@@ -18,15 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { useFixedCosts } from "@/hooks/useFixedCosts";
 import { formatCurrency } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
-
-// Mock upcoming payments - typically would come from a payments/bills table
-const upcomingPayments = [
-  { name: "Folha de Pagamento", amount: 110000, date: "05/01", status: "upcoming" },
-  { name: "Aluguel", amount: 8500, date: "05/01", status: "upcoming" },
-  { name: "Contabilidade", amount: 2500, date: "10/01", status: "upcoming" },
-  { name: "Internet + Telefonia", amount: 1200, date: "15/01", status: "upcoming" },
-  { name: "Simples Nacional", amount: 32000, date: "20/01", status: "upcoming" },
-];
+import { CreateFixedCostModal } from "@/components/modals/CreateFixedCostModal";
 
 export default function FixedCosts() {
   const { data: costs, isLoading } = useFixedCosts();
@@ -62,16 +54,11 @@ export default function FixedCosts() {
     const iPercent = tActual ? (iCost / tActual) * 100 : 0;
     const oPercent = tActual ? (oCost / tActual) * 100 : 0;
 
-    // Use current month actuals mixed with mock history
-    const compData = [
-      { month: "Jul", budgeted: 245000, actual: 242000 },
-      { month: "Ago", budgeted: 248000, actual: 251000 },
-      { month: "Set", budgeted: 250000, actual: 248500 },
-      { month: "Out", budgeted: 252000, actual: 254000 },
-      { month: "Nov", budgeted: 255000, actual: 253000 },
-      { month: "Dez", budgeted: 258000, actual: 260000 },
-      { month: "Jan", budgeted: 260000, actual: tActual },
-    ];
+    // Only show current month based on actual data present
+    const compData: any[] = [];
+    if (tActual > 0) {
+      compData.push({ month: "Atual", budgeted: 0, actual: tActual });
+    }
 
     return {
       totalActual: tActual,
@@ -109,33 +96,37 @@ export default function FixedCosts() {
       title="Custos Fixos"
       subtitle="Gestão de despesas recorrentes e provisionamentos"
     >
+      <div className="mb-6 flex justify-end">
+        <CreateFixedCostModal />
+      </div>
+
       {/* Metric Cards */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Total Custos Fixos"
           value={formatCurrency(totalActual)}
-          change={{ value: 1.2, isPositive: false }}
+          change={0}
           icon={Building2}
           description="Este mês"
         />
         <MetricCard
           title="Pessoal"
           value={formatCurrency(personnelCost)}
-          change={{ value: 0, isPositive: true }}
+          change={0}
           icon={Users}
           description={`${personnelPercent.toFixed(1)}% do total`}
         />
         <MetricCard
           title="Infraestrutura"
           value={formatCurrency(infrastructureCost)}
-          change={{ value: 0, isPositive: true }}
+          change={0}
           icon={Server}
           description={`${infraPercent.toFixed(1)}% do total`}
         />
         <MetricCard
           title="Operacional"
           value={formatCurrency(operationalCost)}
-          change={{ value: 2.1, isPositive: false }}
+          change={0}
           icon={Briefcase}
           description={`${operationalPercent.toFixed(1)}% do total`}
         />
@@ -149,29 +140,35 @@ export default function FixedCosts() {
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={comparisonData} barGap={0}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                  <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                  <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v / 1000}k`} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number) => [`R$ ${value.toLocaleString()}`, '']}
-                  />
-                  <Legend />
-                  <Bar dataKey="budgeted" name="Orçado" fill="hsl(var(--muted-foreground))" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="actual" name="Realizado" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              {comparisonData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={comparisonData} barGap={0}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                    <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
+                    <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v / 1000}k`} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                      formatter={(value: number) => [`R$ ${value.toLocaleString()}`, '']}
+                    />
+                    <Legend />
+                    <Bar dataKey="budgeted" name="Orçado" fill="hsl(var(--muted-foreground))" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="actual" name="Realizado" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-muted-foreground">
+                  Sem dados suficientes.
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Upcoming Payments */}
+        {/* Upcoming Payments - REMOVED MOCK */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
@@ -180,28 +177,10 @@ export default function FixedCosts() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {upcomingPayments.map((payment, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between rounded-lg border border-border p-3"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{payment.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Vence em {payment.date}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-medium">
-                      R$ {payment.amount.toLocaleString()}
-                    </p>
-                    <Badge variant="outline" className="text-xs">
-                      Agendado
-                    </Badge>
-                  </div>
-                </div>
-              ))}
+            <div className="flex h-[200px] items-center justify-center text-center text-sm text-muted-foreground p-4">
+              Use a Importação para adicionar contas a pagar.
+              <br />
+              (Tabela de Pagamentos Futuros ainda não vinculada)
             </div>
           </CardContent>
         </Card>

@@ -54,16 +54,19 @@ export default function Metrics() {
     // Growth Rate
     const growth = previous.mrr > 0 ? ((current.mrr - previous.mrr) / previous.mrr) * 100 : 0;
 
-    // MRR Data for Chart
+    // MRR Data for Chart - Only building from real history
     const chartData = metrics?.map((m, i) => {
       const prev = metrics[i - 1] || { mrr: 0 };
       const diff = m.mrr - prev.mrr;
+      // Without real breakdown, we simplify:
+      // Positive diff -> New
+      // Negative diff -> Churn
       return {
         month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }),
         new: diff > 0 ? diff : 0,
-        expansion: diff > 0 ? diff * 0.2 : 0, // Mock
-        contraction: diff < 0 ? Math.abs(diff) : 0, // Mock
-        churn: m.churn_rate > 0 ? (m.mrr * m.churn_rate / 100) : 0 // Approx churn volume
+        expansion: 0, // No expansion data in current schema
+        contraction: 0, // No contraction data in current schema
+        churn: diff < 0 ? Math.abs(diff) : 0
       };
     }) || [];
 
@@ -161,53 +164,59 @@ export default function Metrics() {
             Componentes do MRR
           </h3>
           <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={mrrData}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="hsl(var(--border))"
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="month"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-                  tickFormatter={(val) => new Intl.NumberFormat("pt-BR", { notation: "compact" }).format(val)}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                  }}
-                  formatter={(value: number) => formatCurrency(value)}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="new"
-                  stackId="1"
-                  stroke="hsl(var(--primary))"
-                  fill="hsl(var(--primary))"
-                  fillOpacity={0.6}
-                  name="Novo MRR"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="expansion"
-                  stackId="1"
-                  stroke="hsl(var(--success))"
-                  fill="hsl(var(--success))"
-                  fillOpacity={0.6}
-                  name="Expansão"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            {mrrData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={mrrData}>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="hsl(var(--border))"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="month"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+                    tickFormatter={(val) => new Intl.NumberFormat("pt-BR", { notation: "compact" }).format(val)}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "8px",
+                    }}
+                    formatter={(value: number) => formatCurrency(value)}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="new"
+                    stackId="1"
+                    stroke="hsl(var(--primary))"
+                    fill="hsl(var(--primary))"
+                    fillOpacity={0.6}
+                    name="Novo MRR"
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="churn"
+                    stackId="1"
+                    stroke="hsl(var(--destructive))"
+                    fill="hsl(var(--destructive))"
+                    fillOpacity={0.6}
+                    name="Churn"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                Sem dados históricos de MRR.
+              </div>
+            )}
           </div>
         </div>
 
@@ -216,31 +225,37 @@ export default function Metrics() {
             Distribuição por Plano
           </h3>
           <div className="h-[200px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={planDistribution}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {planDistribution.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                  }}
-                  formatter={(value: number) => `${value}%`}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            {planDistribution.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={planDistribution}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {planDistribution.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "8px",
+                    }}
+                    formatter={(value: number) => `${value}%`}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                Sem clientes.
+              </div>
+            )}
           </div>
           <div className="mt-4 space-y-2">
             {planDistribution.map((plan) => (
@@ -271,31 +286,31 @@ export default function Metrics() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             title="Growth Rate Mensal"
-            value="10.7%"
-            change={2.3}
+            value={`${growthRate.toFixed(1)}%`}
+            change={0}
             icon={<TrendingUp className="h-6 w-6" />}
             variant="success"
           />
           <MetricCard
             title="Quick Ratio"
-            value="4.2"
-            change={8.5}
+            value="N/A"
+            change={0}
             changeLabel="ideal > 4"
             icon={<Zap className="h-6 w-6" />}
             variant="success"
           />
           <MetricCard
             title="Magic Number"
-            value="0.92"
-            change={12.4}
+            value="N/A"
+            change={0}
             changeLabel="ideal > 0.75"
             icon={<Target className="h-6 w-6" />}
             variant="success"
           />
           <MetricCard
             title="Rule of 40"
-            value="52%"
-            change={4.0}
+            value="N/A"
+            change={0}
             changeLabel="ideal > 40%"
             icon={<BarChart3 className="h-6 w-6" />}
             variant="success"
@@ -311,29 +326,29 @@ export default function Metrics() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             title="Churn Rate (Clientes)"
-            value={`${currentMetric.churn_rate}%`}
-            change={-0.5} // Mock change
+            value={`${currentMetric.churn_rate || 0}%`}
+            change={0}
             icon={<TrendingDown className="h-6 w-6" />}
             variant="success"
           />
           <MetricCard
             title="Churn Rate (Receita)"
-            value={`${(currentMetric.churn_rate * 1.1).toFixed(1)}%`}
-            change={-1.1} // Mock change
+            value="N/A"
+            change={0}
             icon={<DollarSign className="h-6 w-6" />}
             variant="success"
           />
           <MetricCard
             title="Net Revenue Retention"
-            value="118%"
-            change={5.4}
+            value="N/A"
+            change={0}
             icon={<TrendingUp className="h-6 w-6" />}
             variant="success"
           />
           <MetricCard
             title="Gross Revenue Retention"
-            value="95%"
-            change={2.1}
+            value="N/A"
+            change={0}
             icon={<BarChart3 className="h-6 w-6" />}
             variant="primary"
           />
@@ -348,30 +363,30 @@ export default function Metrics() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             title="LTV"
-            value={formatCurrency(arpu / (currentMetric.churn_rate / 100 || 0.05))}
-            change={14.8}
+            value={formatCurrency(arpu / ((currentMetric.churn_rate || 1) / 100))}
+            change={0}
             icon={<DollarSign className="h-6 w-6" />}
             variant="primary"
           />
           <MetricCard
             title="CAC"
-            value="R$ 4.000"
-            change={-5.2}
+            value="N/A"
+            change={0}
             icon={<Target className="h-6 w-6" />}
             variant="success"
           />
           <MetricCard
             title="LTV:CAC Ratio"
-            value="5.3x"
-            change={21.3}
+            value="N/A"
+            change={0}
             changeLabel="ideal > 3x"
             icon={<BarChart3 className="h-6 w-6" />}
             variant="success"
           />
           <MetricCard
             title="CAC Payback"
-            value="6 meses"
-            change={-14.3}
+            value="N/A"
+            change={0}
             changeLabel="ideal < 12 meses"
             icon={<Clock className="h-6 w-6" />}
             variant="success"

@@ -26,21 +26,6 @@ import { useDashboardData } from "@/hooks/useDashboardData";
 import { useClients } from "@/hooks/useClients";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const cacByChannelData = [
-  { channel: "Google Ads", cac: 4500, clients: 12 },
-  { channel: "LinkedIn Ads", cac: 6200, clients: 8 },
-  { channel: "Orgânico/SEO", cac: 1200, clients: 35 },
-  { channel: "Indicação", cac: 800, clients: 28 },
-  { channel: "Eventos", cac: 8500, clients: 5 },
-];
-
-const cacComponentsData = [
-  { name: "Marketing Digital", value: 45000, color: "hsl(var(--chart-1))" },
-  { name: "Time de Vendas", value: 85000, color: "hsl(var(--chart-2))" },
-  { name: "Ferramentas", value: 12000, color: "hsl(var(--chart-3))" },
-  { name: "Eventos", value: 18000, color: "hsl(var(--chart-4))" },
-];
-
 export default function LtvCac() {
   const { metrics, isLoading: isLoadingMetrics } = useDashboardData();
   const { data: clients, isLoading: isLoadingClients } = useClients();
@@ -51,13 +36,18 @@ export default function LtvCac() {
   });
 
   const { ltvCacTrendData, currentMetric } = useMemo(() => {
-    if (!metrics) return { ltvCacTrendData: [], currentMetric: { ltv: 0, cac: 0, ratio: 0 } };
+    if (!metrics || metrics.length === 0) return { ltvCacTrendData: [], currentMetric: { ltv: 0, cac: 0, ratio: 0 } };
 
     const trends = metrics.map(m => {
       const arpu = m.customers_count > 0 ? m.mrr / m.customers_count : 0;
-      const churn = m.churn_rate > 0 ? m.churn_rate / 100 : 0.05; // Fallback to 5% if 0
+      const churn = m.churn_rate > 0 ? m.churn_rate / 100 : 0;
       const ltv = churn > 0 ? arpu / churn : 0;
-      const cac = ltv > 0 ? ltv / (3 + Math.random()) : 1000; // Mock CAC
+      // CAC calculation requires real expense data which might be missing. 
+      // Using a simplified heuristic based on expenses if available, or 0.
+      // Assuming 'expenses' in financial_metrics roughly equates to acquisition costs for this context
+      // is incorrect, but without a dedicated 'marketing_spend' table, we use 0 to avoid fake numbers.
+      const cac = 0;
+
       return {
         month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }),
         ltv: Math.round(ltv),
@@ -97,7 +87,7 @@ export default function LtvCac() {
 
     return Object.entries(planStats).map(([plan, stats], index) => ({
       plan,
-      ltv: stats.count > 0 ? (stats.totalMrr / stats.count) * 30 : 0, // Approx LTV
+      ltv: stats.count > 0 ? (stats.totalMrr / stats.count) * 30 : 0, // Approx LTV assuming 30 months retention if unknown
       clients: stats.count,
       color: `hsl(var(--chart-${index + 1}))`
     }));
@@ -133,28 +123,28 @@ export default function LtvCac() {
         <MetricCard
           title="LTV Médio"
           value={formatCurrency(baseLTV)}
-          change={{ value: 5.8, isPositive: true }}
+          change={0}
           icon={TrendingUp}
           description="Por cliente"
         />
         <MetricCard
           title="CAC Médio"
           value={formatCurrency(baseCAC)}
-          change={{ value: 8.2, isPositive: true }} // Mock change
+          change={0}
           icon={DollarSign}
-          description="Por aquisição (Est.)"
+          description="Por aquisição"
         />
         <MetricCard
           title="LTV:CAC Ratio"
           value={`${currentMetric.ratio}:1`}
-          change={{ value: 12, isPositive: true }}
+          change={0}
           icon={Target}
           description="Meta: > 3:1"
         />
         <MetricCard
           title="Payback Period"
-          value={`${(baseCAC / (baseLTV / 30) || 0).toFixed(1)} meses`} // CAC / ARPU roughly
-          change={{ value: 1.2, isPositive: true }}
+          value={`${(baseCAC / (baseLTV / 30) || 0).toFixed(1)} meses`}
+          change={0}
           icon={Clock}
           description="Tempo para recuperar CAC"
         />
@@ -168,29 +158,35 @@ export default function LtvCac() {
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={ltvCacTrendData}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                  <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                  <YAxis yAxisId="left" tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v / 1000}k`} />
-                  <YAxis yAxisId="right" orientation="right" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number, name: string) => {
-                      if (name === "ratio") return [value.toFixed(2), "LTV:CAC"];
-                      return [`R$ ${value.toLocaleString()}`, name === "ltv" ? "LTV" : "CAC"];
-                    }}
-                  />
-                  <Legend />
-                  <Line yAxisId="left" type="monotone" dataKey="ltv" name="LTV" stroke="hsl(var(--success))" strokeWidth={2} dot={{ fill: 'hsl(var(--success))' }} />
-                  <Line yAxisId="left" type="monotone" dataKey="cac" name="CAC" stroke="hsl(var(--destructive))" strokeWidth={2} dot={{ fill: 'hsl(var(--destructive))' }} />
-                  <Line yAxisId="right" type="monotone" dataKey="ratio" name="LTV:CAC" stroke="hsl(var(--primary))" strokeWidth={2} strokeDasharray="5 5" dot={{ fill: 'hsl(var(--primary))' }} />
-                </LineChart>
-              </ResponsiveContainer>
+              {ltvCacTrendData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={ltvCacTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                    <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
+                    <YAxis yAxisId="left" tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v}`} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                      formatter={(value: number, name: string) => {
+                        if (name === "ratio") return [value.toFixed(2), "LTV:CAC"];
+                        return [`R$ ${value.toLocaleString()}`, name === "ltv" ? "LTV" : "CAC"];
+                      }}
+                    />
+                    <Legend />
+                    <Line yAxisId="left" type="monotone" dataKey="ltv" name="LTV" stroke="hsl(var(--success))" strokeWidth={2} dot={{ fill: 'hsl(var(--success))' }} />
+                    <Line yAxisId="left" type="monotone" dataKey="cac" name="CAC" stroke="hsl(var(--destructive))" strokeWidth={2} dot={{ fill: 'hsl(var(--destructive))' }} />
+                    <Line yAxisId="right" type="monotone" dataKey="ratio" name="LTV:CAC" stroke="hsl(var(--primary))" strokeWidth={2} strokeDasharray="5 5" dot={{ fill: 'hsl(var(--primary))' }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-muted-foreground">
+                  Sem dados suficientes para exibir o gráfico.
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -203,23 +199,29 @@ export default function LtvCac() {
             <CardTitle className="text-lg">LTV por Plano</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {ltvByPlanData.map((plan) => (
-                <div key={plan.plan} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="h-3 w-3 rounded-full" style={{ backgroundColor: plan.color }} />
-                      <span className="font-medium">{plan.plan}</span>
+            {ltvByPlanData.length > 0 ? (
+              <div className="space-y-4">
+                {ltvByPlanData.map((plan) => (
+                  <div key={plan.plan} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="h-3 w-3 rounded-full" style={{ backgroundColor: plan.color }} />
+                        <span className="font-medium">{plan.plan}</span>
+                      </div>
+                      <Badge variant="secondary">{plan.clients} clientes</Badge>
                     </div>
-                    <Badge variant="secondary">{plan.clients} clientes</Badge>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">LTV Médio</span>
+                      <span className="font-medium">{formatCurrency(plan.ltv)}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">LTV Médio</span>
-                    <span className="font-medium">{formatCurrency(plan.ltv)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex h-[200px] items-center justify-center text-muted-foreground">
+                Sem dados de clientes.
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -229,23 +231,10 @@ export default function LtvCac() {
             <CardTitle className="text-lg">CAC por Canal</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={cacByChannelData} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                  <XAxis type="number" tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v / 1000}k`} />
-                  <YAxis dataKey="channel" type="category" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} width={80} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number) => [formatCurrency(value), 'CAC']}
-                  />
-                  <Bar dataKey="cac" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="flex h-[200px] items-center justify-center text-center text-sm text-muted-foreground">
+              Dados reais de canais de aquisição ainda não implementados no banco de dados.
+              <br />
+              Use a Importação de Dados para adicionar.
             </div>
           </CardContent>
         </Card>
@@ -256,42 +245,8 @@ export default function LtvCac() {
             <CardTitle className="text-lg">Componentes do CAC</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-[150px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={cacComponentsData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={40}
-                    outerRadius={60}
-                    dataKey="value"
-                  >
-                    {cacComponentsData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number) => [formatCurrency(value), '']}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="mt-4 space-y-2">
-              {cacComponentsData.map((item) => (
-                <div key={item.name} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <div className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span className="text-muted-foreground">{item.name}</span>
-                  </div>
-                  <span>{formatCurrency(item.value)}</span>
-                </div>
-              ))}
+            <div className="flex h-[200px] items-center justify-center text-center text-sm text-muted-foreground">
+              Aguardando dados de custos de marketing.
             </div>
           </CardContent>
         </Card>
@@ -346,14 +301,14 @@ export default function LtvCac() {
                   <p className="text-sm text-muted-foreground">Novo LTV</p>
                   <p className="text-2xl font-bold text-success">{formatCurrency(simulatedLTV)}</p>
                   <p className="text-xs text-muted-foreground">
-                    {simulatedLTV > baseLTV ? "+" : ""}{((simulatedLTV - baseLTV) / baseLTV * 100).toFixed(1)}%
+                    {simulatedLTV > baseLTV ? "+" : ""}{baseLTV > 0 ? ((simulatedLTV - baseLTV) / baseLTV * 100).toFixed(1) : 0}%
                   </p>
                 </div>
                 <div className="rounded-lg bg-background p-4 text-center">
                   <p className="text-sm text-muted-foreground">Novo CAC</p>
                   <p className="text-2xl font-bold text-primary">{formatCurrency(simulatedCAC)}</p>
                   <p className="text-xs text-muted-foreground">
-                    {simulatedCAC < baseCAC ? "-" : "+"}{Math.abs((simulatedCAC - baseCAC) / baseCAC * 100).toFixed(1)}%
+                    {simulatedCAC < baseCAC ? "-" : "+"}{baseCAC > 0 ? Math.abs((simulatedCAC - baseCAC) / baseCAC * 100).toFixed(1) : 0}%
                   </p>
                 </div>
                 <div className="rounded-lg bg-background p-4 text-center">

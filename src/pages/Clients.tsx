@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import {
 import { Plus, Search, Filter, Download, MoreHorizontal } from "lucide-react";
 import { useClients } from "@/hooks/useClients";
 import { ClientStatusBadge } from "@/components/clients/ClientStatusBadge";
+import { CreateClientModal } from "@/components/modals/CreateClientModal";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -21,17 +22,56 @@ const getHealthScoreColor = (score: number) => {
   return "text-destructive";
 };
 
+
 export default function Clients() {
   const { data: clients, isLoading } = useClients();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const filteredClients = useMemo(() => {
+    if (!clients) return [];
+    return clients.filter((client) => {
+      const matchesSearch = client.name
+        .toLowerCase()
+        .includes(searchTerm.toLowerCase());
+      const matchesStatus =
+        statusFilter === "all" || client.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [clients, searchTerm, statusFilter]);
 
   const { activeClients, trialClients, churnedClients } = useMemo(() => {
-    if (!clients) return { activeClients: 0, trialClients: 0, churnedClients: 0 };
+    if (!clients)
+      return { activeClients: 0, trialClients: 0, churnedClients: 0 };
     return {
       activeClients: clients.filter((c) => c.status === "active").length,
       trialClients: clients.filter((c) => c.status === "trial").length,
       churnedClients: clients.filter((c) => c.status === "churned").length,
     };
   }, [clients]);
+
+  const handleExport = () => {
+    if (!clients) return;
+    const header = ["Nome", "CNPJ", "Status", "MRR", "ARR", "Inicio"];
+    const rows = clients.map((c) => [
+      c.name,
+      c.cnpj,
+      c.status,
+      c.mrr,
+      c.arr,
+      c.start_date,
+    ]);
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [header.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "clientes.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   if (isLoading) {
     return (
@@ -65,9 +105,11 @@ export default function Clients() {
             <Input
               placeholder="Buscar cliente..."
               className="bg-secondary pl-10"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <Select defaultValue="all">
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-40 bg-secondary">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
@@ -83,14 +125,11 @@ export default function Clients() {
           </Button>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-2 h-4 w-4" />
             Exportar
           </Button>
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            Novo Cliente
-          </Button>
+          <CreateClientModal />
         </div>
       </div>
 
@@ -125,7 +164,7 @@ export default function Clients() {
       {/* Clients Table */}
       <div className="metric-card overflow-hidden p-0">
         <div className="overflow-x-auto">
-          {clients && clients.length > 0 ? (
+          {filteredClients.length > 0 ? (
             <table className="data-table">
               <thead className="bg-muted/50">
                 <tr>
@@ -143,7 +182,7 @@ export default function Clients() {
                 </tr>
               </thead>
               <tbody>
-                {clients.map((client) => (
+                {filteredClients.map((client) => (
                   <tr key={client.id}>
                     <td className="font-medium">{client.name}</td>
                     <td className="font-mono text-muted-foreground">
@@ -156,10 +195,14 @@ export default function Clients() {
                       <ClientStatusBadge status={client.status} />
                     </td>
                     <td className="font-mono text-muted-foreground">
-                      {client.start_date ? formatDate(client.start_date) : "-"}
+                      {client.start_date
+                        ? formatDate(client.start_date)
+                        : "-"}
                     </td>
                     <td className="font-mono text-muted-foreground">
-                      {client.renewal_date ? formatDate(client.renewal_date) : "-"}
+                      {client.renewal_date
+                        ? formatDate(client.renewal_date)
+                        : "-"}
                     </td>
                     <td>
                       <span
@@ -188,12 +231,11 @@ export default function Clients() {
                 Nenhum cliente encontrado
               </p>
               <p className="text-sm text-muted-foreground">
-                Adicione um novo cliente para começar.
+                Mude os filtros ou adicione um novo cliente.
               </p>
-              <Button className="mt-4" variant="outline">
-                <Plus className="mr-2 h-4 w-4" />
-                Novo Cliente
-              </Button>
+              <div className="mt-4">
+                <CreateClientModal />
+              </div>
             </div>
           )}
         </div>

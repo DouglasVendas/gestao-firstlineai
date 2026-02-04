@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Edit, MoreHorizontal, Users, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePlans } from "@/hooks/usePlans";
+import { CreatePlanModal } from "@/components/modals/CreatePlanModal";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -43,10 +44,7 @@ export default function Plans() {
             {plans?.length || 0} planos
           </Badge>
         </div>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Novo Plano
-        </Button>
+        <CreatePlanModal />
       </div>
 
       {/* Summary Stats - keeping static placeholder for aggregate stats or we could fetch metrics */}

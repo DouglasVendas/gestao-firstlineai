@@ -5,36 +5,16 @@ import { VariableCostsTable } from "@/components/costs/VariableCostsTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TrendingDown, Percent, Users, AlertTriangle } from "lucide-react";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
+  Tooltip,
+  ResponsiveContainer,
 } from "recharts";
 import { useVariableCosts } from "@/hooks/useVariableCosts";
 import { formatCurrency } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
-
-// Mock historical data as DB only has snapshot
-const monthlyData = [
-  { month: "Jul", apis: 18500, cloud: 18200, gateway: 9800 },
-  { month: "Ago", apis: 19200, cloud: 18800, gateway: 10200 },
-  { month: "Set", apis: 20100, cloud: 19500, gateway: 10500 },
-  { month: "Out", apis: 21500, cloud: 20100, gateway: 10800 },
-  { month: "Nov", apis: 22300, cloud: 20400, gateway: 11000 },
-  { month: "Dez", apis: 22800, cloud: 20600, gateway: 11200 },
-  { month: "Jan", apis: 23000, cloud: 20700, gateway: 11500 },
-];
-
-const alerts = [
-  { client: "Tech Solutions", service: "Anthropic", increase: 45, message: "Consumo 45% acima da média" },
-  { client: "Digital Corp", service: "AWS", increase: 28, message: "Pico de storage detectado" },
-];
+import { CreateVariableCostModal } from "@/components/modals/CreateVariableCostModal";
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
 
@@ -78,93 +58,51 @@ export default function VariableCosts() {
       title="Custos Variáveis"
       subtitle="Gestão de custos proporcionais ao uso e consumo"
     >
+      <div className="mb-6 flex justify-end">
+        <CreateVariableCostModal />
+      </div>
+
       {/* Metric Cards */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Total Custos Variáveis"
           value={formatCurrency(totalVariableCosts)}
-          change={{ value: 4.5, isPositive: false }}
+          change={0}
           icon={TrendingDown}
           description="Este mês"
         />
         <MetricCard
           title="Margem de Contribuição"
-          value="82.5%" // Calculated field requiring Revenue - VarCosts. Static for now.
-          change={{ value: 1.2, isPositive: true }}
+          value="N/A"
+          change={0}
           icon={Percent}
-          description="Receita - Custos Var."
+          description="Dados insuficientes"
         />
         <MetricCard
           title="Custo Médio por Cliente"
-          value="R$ 552" // Static. Requires active clients count.
-          change={{ value: 2.1, isPositive: false }}
+          value="N/A"
+          change={0}
           icon={Users}
-          description="100 clientes ativos"
+          description="Dados insuficientes"
         />
         <MetricCard
           title="Alertas Ativos"
-          value={alerts.length.toString()}
-          change={{ value: 1, isPositive: false }}
+          value="0"
+          change={0}
           icon={AlertTriangle}
-          description="Consumo anômalo"
+          description="Nenhum alerta"
         />
       </div>
 
-      {/* Alerts */}
-      {alerts.length > 0 && (
-        <Card className="mb-6 border-warning/50 bg-warning/5">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg text-warning">
-              <AlertTriangle className="h-5 w-5" />
-              Alertas de Consumo Anômalo
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {alerts.map((alert, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between rounded-lg bg-background/50 p-3"
-                >
-                  <div>
-                    <span className="font-medium">{alert.client}</span>
-                    <span className="mx-2 text-muted-foreground">•</span>
-                    <span className="text-muted-foreground">{alert.service}</span>
-                  </div>
-                  <span className="text-sm text-warning">{alert.message}</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       <div className="mb-6 grid gap-6 lg:grid-cols-3">
-        {/* Monthly Trend */}
+        {/* Monthly Trend - REMOVED MOCK */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-lg">Evolução por Categoria</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyData}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                  <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                  <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v / 1000}k`} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number) => [`R$ ${value.toLocaleString()}`, '']}
-                  />
-                  <Bar dataKey="apis" name="APIs de IA" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="cloud" name="Cloud" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="gateway" name="Gateway" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+              Sem histórico de custos variáveis.
             </div>
           </CardContent>
         </Card>
@@ -176,32 +114,36 @@ export default function VariableCosts() {
           </CardHeader>
           <CardContent>
             <div className="h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={categoryData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                  >
-                    {categoryData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number) => [`R$ ${value.toLocaleString()}`, '']}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              {categoryData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={categoryData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={80}
+                      dataKey="value"
+                    >
+                      {categoryData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                      formatter={(value: number) => [`R$ ${value.toLocaleString()}`, '']}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-muted-foreground">
+                  Sem dados.
+                </div>
+              )}
             </div>
             <div className="mt-4 space-y-2">
               {categoryData.map((cat) => (

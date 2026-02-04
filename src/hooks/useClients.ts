@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 export interface Client {
@@ -66,6 +66,27 @@ export const useRecentClients = () => {
 
             if (error) throw error;
             return data as unknown as Client[];
+        },
+    });
+};
+
+export const useCreateClient = () => {
+    return useMutation({
+        mutationFn: async (newClient: Omit<Client, "id" | "created_at" | "plan"> & { plan_id?: string }) => {
+            const { data, error } = await supabase
+                .from("clients")
+                .insert(newClient)
+                .select()
+                .single();
+
+            if (error) throw error;
+            return data;
+        },
+        onSuccess: () => {
+            const queryClient = useQueryClient();
+            queryClient.invalidateQueries({ queryKey: ["clients"] });
+            queryClient.invalidateQueries({ queryKey: ["clients", "count"] });
+            queryClient.invalidateQueries({ queryKey: ["clients", "recent"] });
         },
     });
 };

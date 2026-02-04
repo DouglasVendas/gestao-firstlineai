@@ -18,17 +18,7 @@ import {
 import { useInvoices } from "@/hooks/useInvoices";
 import { formatCurrency } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
-
-// Mock compliance trend as history isn't stored in invoices table
-const complianceData = [
-  { month: "Jul", rate: 94.2 },
-  { month: "Ago", rate: 95.1 },
-  { month: "Set", rate: 93.8 },
-  { month: "Out", rate: 96.2 },
-  { month: "Nov", rate: 95.5 },
-  { month: "Dez", rate: 94.8 },
-  { month: "Jan", rate: 96.5 },
-];
+import { CreateInvoiceModal } from "@/components/modals/CreateInvoiceModal";
 
 export default function Receivables() {
   const { data: invoices, isLoading } = useInvoices();
@@ -77,26 +67,6 @@ export default function Receivables() {
     };
   }, [invoices]);
 
-  if (isLoading) {
-    return (
-      <AppLayout title="Recebimentos" subtitle="Gestão de faturas, cobranças e inadimplência">
-        <div className="space-y-4">
-          <div className="flex gap-2 mb-6">
-            <Skeleton className="h-10 w-32" />
-            <Skeleton className="h-10 w-32" />
-            <Skeleton className="h-10 w-48" />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-32 w-full" />
-            ))}
-          </div>
-          <Skeleton className="h-[400px] w-full" />
-        </div>
-      </AppLayout>
-    );
-  }
-
   return (
     <AppLayout
       title="Recebimentos"
@@ -104,51 +74,53 @@ export default function Receivables() {
     >
       {/* Actions */}
       <div className="mb-6 flex flex-wrap items-center gap-3">
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Nova Fatura
-        </Button>
-        <Button variant="outline">
-          <FileText className="mr-2 h-4 w-4" />
-          Gerar Relatório
-        </Button>
-        <Button variant="outline">
-          <Send className="mr-2 h-4 w-4" />
+        <CreateInvoiceModal />
+        <Button variant="outline" className="flex items-center gap-2">
+          <Send className="h-4 w-4" />
           Enviar Cobranças em Lote
         </Button>
       </div>
 
-      {/* Metric Cards */}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard
-          title="Total Faturado"
-          value={formatCurrency(totalInvoiced)}
-          change={{ value: 8.2, isPositive: true }}
-          icon={Receipt}
-          description="Total listado"
-        />
-        <MetricCard
-          title="Total Recebido"
-          value={formatCurrency(totalReceived)}
-          change={{ value: 12.5, isPositive: true }}
-          icon={DollarSign}
-          description="Faturas pagas"
-        />
-        <MetricCard
-          title="Em Aberto"
-          value={formatCurrency(pendingAmount)}
-          change={{ value: 3.2, isPositive: false }}
-          icon={Clock}
-          description="Pendentes + Atrasados"
-        />
-        <MetricCard
-          title="Inadimplência"
-          value={`${defaultRate.toFixed(1)}%`}
-          change={{ value: 0.8, isPositive: true }}
-          icon={AlertTriangle}
-          description="Taxa atual"
-        />
-      </div>
+      {
+        isLoading ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-32 w-full" />
+            ))}
+          </div>
+        ) : (
+          <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricCard
+              title="Total Faturado"
+              value={formatCurrency(totalInvoiced)}
+              change={0}
+              icon={Receipt}
+              description="Total listado"
+            />
+            <MetricCard
+              title="Total Recebido"
+              value={formatCurrency(totalReceived)}
+              change={0}
+              icon={DollarSign}
+              description="Faturas pagas"
+            />
+            <MetricCard
+              title="Em Aberto"
+              value={formatCurrency(pendingAmount)}
+              change={0}
+              icon={Clock}
+              description="Pendentes + Atrasados"
+            />
+            <MetricCard
+              title="Inadimplência"
+              value={`${defaultRate.toFixed(1)}%`}
+              change={0}
+              icon={AlertTriangle}
+              description="Taxa atual"
+            />
+          </div>
+        )
+      }
 
       {/* Aging List */}
       <Card className="mb-6">
@@ -161,41 +133,14 @@ export default function Receivables() {
       </Card>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-3">
-        {/* Compliance Chart */}
+        {/* Compliance Chart - REMOVED MOCK */}
         <Card className="lg:col-span-1">
           <CardHeader>
             <CardTitle className="text-lg">Taxa de Adimplência</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={complianceData}>
-                  <defs>
-                    <linearGradient id="complianceGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                  <XAxis dataKey="month" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                  <YAxis domain={[90, 100]} className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number) => [`${value}%`, 'Adimplência']}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="rate"
-                    stroke="hsl(var(--success))"
-                    fill="url(#complianceGradient)"
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+            <div className="flex h-[200px] items-center justify-center text-center text-sm text-muted-foreground p-4">
+              Sem histórico suficiente para exibir o gráfico de adimplência.
             </div>
           </CardContent>
         </Card>
@@ -206,23 +151,27 @@ export default function Receivables() {
             <CardTitle className="text-lg">Resumo Geral</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="rounded-lg bg-success/10 p-4">
-                <p className="text-sm text-muted-foreground">Faturas Pagas</p>
-                <p className="text-2xl font-bold text-success">{paidCount}</p>
-                <p className="text-xs text-muted-foreground">{formatCurrency(totalReceived)}</p>
+            {isLoading ? (
+              <Skeleton className="h-[100px] w-full" />
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="rounded-lg bg-success/10 p-4">
+                  <p className="text-sm text-muted-foreground">Faturas Pagas</p>
+                  <p className="text-2xl font-bold text-success">{paidCount}</p>
+                  <p className="text-xs text-muted-foreground">{formatCurrency(totalReceived)}</p>
+                </div>
+                <div className="rounded-lg bg-warning/10 p-4">
+                  <p className="text-sm text-muted-foreground">Pendentes</p>
+                  <p className="text-2xl font-bold text-warning">{pendingCount}</p>
+                  <p className="text-xs text-muted-foreground">{formatCurrency(pendingAmount - overdueAmount)}</p>
+                </div>
+                <div className="rounded-lg bg-destructive/10 p-4">
+                  <p className="text-sm text-muted-foreground">Atrasados</p>
+                  <p className="text-2xl font-bold text-destructive">{overdueCount}</p>
+                  <p className="text-xs text-muted-foreground">{formatCurrency(overdueAmount)}</p>
+                </div>
               </div>
-              <div className="rounded-lg bg-warning/10 p-4">
-                <p className="text-sm text-muted-foreground">Pendentes</p>
-                <p className="text-2xl font-bold text-warning">{pendingCount}</p>
-                <p className="text-xs text-muted-foreground">{formatCurrency(pendingAmount - overdueAmount)}</p>
-              </div>
-              <div className="rounded-lg bg-destructive/10 p-4">
-                <p className="text-sm text-muted-foreground">Atrasados</p>
-                <p className="text-2xl font-bold text-destructive">{overdueCount}</p>
-                <p className="text-xs text-muted-foreground">{formatCurrency(overdueAmount)}</p>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -236,6 +185,6 @@ export default function Receivables() {
           <InvoicesTable />
         </CardContent>
       </Card>
-    </AppLayout>
+    </AppLayout >
   );
 }
