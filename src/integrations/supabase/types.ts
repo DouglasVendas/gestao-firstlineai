@@ -14,7 +14,331 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      budget: {
+        Row: {
+          actual: number
+          budgeted: number
+          category: string
+          created_at: string
+          id: string
+          month: string | null
+        }
+        Insert: {
+          actual?: number
+          budgeted?: number
+          category: string
+          created_at?: string
+          id?: string
+          month?: string | null
+        }
+        Update: {
+          actual?: number
+          budgeted?: number
+          category?: string
+          created_at?: string
+          id?: string
+          month?: string | null
+        }
+        Relationships: []
+      }
+      clients: {
+        Row: {
+          churn_date: string | null
+          churn_reason: string | null
+          created_at: string
+          email: string | null
+          id: string
+          mrr: number
+          name: string
+          plan_id: string | null
+          start_date: string | null
+          status: string
+          voluntary: boolean | null
+        }
+        Insert: {
+          churn_date?: string | null
+          churn_reason?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          mrr?: number
+          name: string
+          plan_id?: string | null
+          start_date?: string | null
+          status?: string
+          voluntary?: boolean | null
+        }
+        Update: {
+          churn_date?: string | null
+          churn_reason?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          mrr?: number
+          name?: string
+          plan_id?: string | null
+          start_date?: string | null
+          status?: string
+          voluntary?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clients_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      financial_metrics: {
+        Row: {
+          arr: number
+          churn_rate: number
+          churned_mrr: number | null
+          contraction_mrr: number | null
+          created_at: string
+          expansion_mrr: number | null
+          expenses: number | null
+          id: string
+          month: string
+          mrr: number
+          new_mrr: number | null
+          revenue: number | null
+        }
+        Insert: {
+          arr?: number
+          churn_rate?: number
+          churned_mrr?: number | null
+          contraction_mrr?: number | null
+          created_at?: string
+          expansion_mrr?: number | null
+          expenses?: number | null
+          id?: string
+          month: string
+          mrr?: number
+          new_mrr?: number | null
+          revenue?: number | null
+        }
+        Update: {
+          arr?: number
+          churn_rate?: number
+          churned_mrr?: number | null
+          contraction_mrr?: number | null
+          created_at?: string
+          expansion_mrr?: number | null
+          expenses?: number | null
+          id?: string
+          month?: string
+          mrr?: number
+          new_mrr?: number | null
+          revenue?: number | null
+        }
+        Relationships: []
+      }
+      fixed_costs: {
+        Row: {
+          actual: number
+          budgeted: number | null
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          month: string | null
+        }
+        Insert: {
+          actual?: number
+          budgeted?: number | null
+          category: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          month?: string | null
+        }
+        Update: {
+          actual?: number
+          budgeted?: number | null
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          month?: string | null
+        }
+        Relationships: []
+      }
+      invoices: {
+        Row: {
+          client_id: string | null
+          created_at: string
+          due_date: string
+          id: string
+          paid_date: string | null
+          status: string
+          value: number
+        }
+        Insert: {
+          client_id?: string | null
+          created_at?: string
+          due_date: string
+          id?: string
+          paid_date?: string | null
+          status?: string
+          value?: number
+        }
+        Update: {
+          client_id?: string | null
+          created_at?: string
+          due_date?: string
+          id?: string
+          paid_date?: string | null
+          status?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoices_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketing_stats: {
+        Row: {
+          campaign_roi: Json | null
+          channel_performance: Json | null
+          created_at: string
+          customers: number | null
+          id: string
+          leads: number | null
+          month: string
+          mql: number | null
+          opportunities: number | null
+          sql: number | null
+          visitors: number | null
+        }
+        Insert: {
+          campaign_roi?: Json | null
+          channel_performance?: Json | null
+          created_at?: string
+          customers?: number | null
+          id?: string
+          leads?: number | null
+          month: string
+          mql?: number | null
+          opportunities?: number | null
+          sql?: number | null
+          visitors?: number | null
+        }
+        Update: {
+          campaign_roi?: Json | null
+          channel_performance?: Json | null
+          created_at?: string
+          customers?: number | null
+          id?: string
+          leads?: number | null
+          month?: string
+          mql?: number | null
+          opportunities?: number | null
+          sql?: number | null
+          visitors?: number | null
+        }
+        Relationships: []
+      }
+      plans: {
+        Row: {
+          created_at: string
+          description: string | null
+          features: Json | null
+          id: string
+          limits: Json | null
+          name: string
+          price_monthly: number
+          price_yearly: number
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          features?: Json | null
+          id?: string
+          limits?: Json | null
+          name: string
+          price_monthly?: number
+          price_yearly?: number
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          features?: Json | null
+          id?: string
+          limits?: Json | null
+          name?: string
+          price_monthly?: number
+          price_yearly?: number
+        }
+        Relationships: []
+      }
+      transactions: {
+        Row: {
+          amount: number
+          category: string | null
+          created_at: string
+          date: string
+          description: string
+          id: string
+          status: string
+          type: string
+        }
+        Insert: {
+          amount?: number
+          category?: string | null
+          created_at?: string
+          date: string
+          description: string
+          id?: string
+          status?: string
+          type?: string
+        }
+        Update: {
+          amount?: number
+          category?: string | null
+          created_at?: string
+          date?: string
+          description?: string
+          id?: string
+          status?: string
+          type?: string
+        }
+        Relationships: []
+      }
+      variable_costs: {
+        Row: {
+          amount: number
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          month: string
+        }
+        Insert: {
+          amount?: number
+          category: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          month: string
+        }
+        Update: {
+          amount?: number
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          month?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
