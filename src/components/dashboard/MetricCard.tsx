@@ -29,7 +29,8 @@ export function MetricCard({
   // Handle both ReactNode and LucideIcon for icon
   const renderIcon = () => {
     if (!icon) return null;
-    if (typeof icon === "function") {
+    // Check if it's a valid React component (function or forwardRef object)
+    if (typeof icon === "function" || (typeof icon === "object" && icon !== null && "$$typeof" in icon && "render" in icon)) {
       const IconComponent = icon as LucideIcon;
       return <IconComponent className="h-6 w-6" />;
     }
