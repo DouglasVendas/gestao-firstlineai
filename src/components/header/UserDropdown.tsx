@@ -30,11 +30,11 @@ interface UserDropdownProps {
 }
 
 const defaultUser = {
-  name: "João Silva",
-  email: "joao@empresa.com.br",
+  name: "Douglas Lopes",
+  email: "douglaslopes@firstlineai.com.br",
   avatar: undefined,
   role: "Administrador",
-  company: "SaaS Metrics Corp",
+  company: "FirstLine AI",
 };
 
 export function UserDropdown({ user = defaultUser }: UserDropdownProps) {
