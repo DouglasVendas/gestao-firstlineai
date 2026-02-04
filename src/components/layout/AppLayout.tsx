@@ -1,7 +1,8 @@
 import { AppSidebar } from "./AppSidebar";
-import { Bell, Search, User } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { NotificationsDropdown } from "@/components/header/NotificationsDropdown";
+import { UserDropdown } from "@/components/header/UserDropdown";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -38,15 +39,10 @@ export function AppLayout({ children, title, subtitle }: AppLayoutProps) {
             </div>
 
             {/* Notifications */}
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" />
-            </Button>
+            <NotificationsDropdown />
 
             {/* User */}
-            <Button variant="ghost" size="icon">
-              <User className="h-5 w-5" />
-            </Button>
+            <UserDropdown />
           </div>
         </header>
 
