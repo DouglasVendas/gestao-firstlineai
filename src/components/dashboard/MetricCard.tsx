@@ -1,12 +1,13 @@
-import { ArrowDown, ArrowUp, Minus } from "lucide-react";
+import { ArrowDown, ArrowUp, Minus, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface MetricCardProps {
   title: string;
   value: string;
-  change?: number;
+  change?: number | { value: number; isPositive: boolean };
   changeLabel?: string;
-  icon?: React.ReactNode;
+  description?: string;
+  icon?: React.ReactNode | LucideIcon;
   variant?: "default" | "primary" | "success" | "warning" | "danger";
 }
 
@@ -15,12 +16,26 @@ export function MetricCard({
   value,
   change,
   changeLabel = "vs. mês anterior",
+  description,
   icon,
   variant = "default",
 }: MetricCardProps) {
-  const isPositive = change && change > 0;
-  const isNegative = change && change < 0;
-  const isNeutral = change === 0;
+  // Handle both number and object formats for change
+  const changeValue = typeof change === "object" ? change.value : change;
+  const isPositive = typeof change === "object" ? change.isPositive : (change !== undefined && change > 0);
+  const isNegative = typeof change === "object" ? !change.isPositive : (change !== undefined && change < 0);
+  const isNeutral = changeValue === 0;
+
+  // Handle both ReactNode and LucideIcon for icon
+  const renderIcon = () => {
+    if (!icon) return null;
+    if (typeof icon === "function") {
+      const IconComponent = icon as LucideIcon;
+      return <IconComponent className="h-6 w-6" />;
+    }
+    return icon as React.ReactNode;
+  };
+  const iconNode = renderIcon();
 
   return (
     <div className="metric-card glow-border animate-fade-in">
@@ -29,7 +44,7 @@ export function MetricCard({
           <p className="metric-label">{title}</p>
           <p className="metric-value font-mono">{value}</p>
           
-          {change !== undefined && (
+          {changeValue !== undefined && (
             <div className="flex items-center gap-2">
               <span
                 className={cn(
@@ -42,16 +57,20 @@ export function MetricCard({
                 {isPositive && <ArrowUp className="h-3 w-3" />}
                 {isNegative && <ArrowDown className="h-3 w-3" />}
                 {isNeutral && <Minus className="h-3 w-3" />}
-                {Math.abs(change)}%
+                {Math.abs(changeValue)}%
               </span>
               <span className="text-xs text-muted-foreground">
-                {changeLabel}
+                {description || changeLabel}
               </span>
             </div>
           )}
+          
+          {description && changeValue === undefined && (
+            <p className="text-xs text-muted-foreground">{description}</p>
+          )}
         </div>
 
-        {icon && (
+        {iconNode && (
           <div
             className={cn(
               "flex h-12 w-12 items-center justify-center rounded-xl",
@@ -62,7 +81,7 @@ export function MetricCard({
               variant === "danger" && "bg-destructive/10 text-destructive"
             )}
           >
-            {icon}
+            {iconNode}
           </div>
         )}
       </div>
