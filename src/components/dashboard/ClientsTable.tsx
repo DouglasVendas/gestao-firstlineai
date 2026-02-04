@@ -1,64 +1,7 @@
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-
-interface Client {
-  id: string;
-  name: string;
-  plan: string;
-  mrr: number;
-  status: "active" | "trial" | "churned" | "inactive";
-  lastPayment: string;
-  healthScore: number;
-}
-
-const clients: Client[] = [
-  {
-    id: "1",
-    name: "TechCorp Brasil",
-    plan: "Enterprise",
-    mrr: 12500,
-    status: "active",
-    lastPayment: "2024-01-15",
-    healthScore: 92,
-  },
-  {
-    id: "2",
-    name: "Startup Inovação",
-    plan: "Pro",
-    mrr: 2990,
-    status: "active",
-    lastPayment: "2024-01-12",
-    healthScore: 78,
-  },
-  {
-    id: "3",
-    name: "Consultoria ABC",
-    plan: "Pro",
-    mrr: 2990,
-    status: "trial",
-    lastPayment: "-",
-    healthScore: 65,
-  },
-  {
-    id: "4",
-    name: "E-commerce Plus",
-    plan: "Enterprise",
-    mrr: 8900,
-    status: "active",
-    lastPayment: "2024-01-10",
-    healthScore: 88,
-  },
-  {
-    id: "5",
-    name: "Agência Digital",
-    plan: "Basic",
-    mrr: 990,
-    status: "churned",
-    lastPayment: "2023-12-05",
-    healthScore: 15,
-  },
-];
+import { useRecentClients } from "@/hooks/useClients";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -67,19 +10,19 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
-const formatDate = (date: string) => {
-  if (date === "-") return "-";
+const formatDate = (date: string | null) => {
+  if (!date) return "-";
   return new Intl.DateTimeFormat("pt-BR").format(new Date(date));
 };
 
-const getStatusBadge = (status: Client["status"]) => {
-  const config = {
+const getStatusBadge = (status: string) => {
+  const config: Record<string, { label: string; class: string }> = {
     active: { label: "Ativo", class: "status-badge-active" },
     trial: { label: "Trial", class: "status-badge-trial" },
     churned: { label: "Cancelado", class: "status-badge-churned" },
     inactive: { label: "Inativo", class: "status-badge-inactive" },
   };
-  return config[status];
+  return config[status] || config["inactive"];
 };
 
 const getHealthScoreColor = (score: number) => {
@@ -89,6 +32,16 @@ const getHealthScoreColor = (score: number) => {
 };
 
 export function ClientsTable() {
+  const { data: recentClients, isLoading } = useRecentClients();
+
+  if (isLoading) {
+    return (
+      <div className="metric-card flex h-[300px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
   return (
     <div className="metric-card animate-slide-up overflow-hidden p-0">
       <div className="border-b border-border p-6">
@@ -98,7 +51,7 @@ export function ClientsTable() {
               Clientes Recentes
             </h3>
             <p className="text-sm text-muted-foreground">
-              Últimos 5 clientes ativos
+              Últimos clientes cadastrados
             </p>
           </div>
           <Button variant="outline" size="sm">
@@ -115,18 +68,18 @@ export function ClientsTable() {
               <th>Plano</th>
               <th>MRR</th>
               <th>Status</th>
-              <th>Último Pagamento</th>
+              <th>Início</th>
               <th>Health Score</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {clients.map((client) => {
+            {recentClients.map((client) => {
               const statusBadge = getStatusBadge(client.status);
               return (
                 <tr key={client.id}>
                   <td className="font-medium">{client.name}</td>
-                  <td>{client.plan}</td>
+                  <td>{client.plan?.name || "-"}</td>
                   <td className="font-mono">{formatCurrency(client.mrr)}</td>
                   <td>
                     <span className={statusBadge.class}>
@@ -143,16 +96,16 @@ export function ClientsTable() {
                     </span>
                   </td>
                   <td className="font-mono text-muted-foreground">
-                    {formatDate(client.lastPayment)}
+                    {formatDate(client.start_date)}
                   </td>
                   <td>
                     <span
                       className={cn(
                         "font-mono font-medium",
-                        getHealthScoreColor(client.healthScore)
+                        getHealthScoreColor(client.health_score)
                       )}
                     >
-                      {client.healthScore}%
+                      {client.health_score}
                     </span>
                   </td>
                   <td>

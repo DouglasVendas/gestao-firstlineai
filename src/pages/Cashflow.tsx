@@ -1,18 +1,9 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Wallet, TrendingUp, TrendingDown, Clock, Plus, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { Plus, Download, TrendingUp, TrendingDown, DollarSign, Wallet, Filter, Loader2, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import {
   AreaChart,
   Area,
@@ -21,83 +12,108 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
   BarChart,
   Bar,
+  Legend,
 } from "recharts";
-import { formatCurrency, formatDate } from "@/lib/formatters";
+import { useTransactions } from "@/hooks/useTransactions";
+import { useDashboardData } from "@/hooks/useDashboardData";
 import { cn } from "@/lib/utils";
 
-const balanceEvolutionData = [
-  { month: "Jul", saldo: 185000, entradas: 285000, saidas: 248000 },
-  { month: "Ago", saldo: 228000, entradas: 295000, saidas: 252000 },
-  { month: "Set", saldo: 278000, entradas: 305000, saidas: 255000 },
-  { month: "Out", saldo: 340000, entradas: 320000, saidas: 258000 },
-  { month: "Nov", saldo: 415000, entradas: 335000, saidas: 260000 },
-  { month: "Dez", saldo: 501000, entradas: 348000, saidas: 262000 },
-  { month: "Jan", saldo: 598000, entradas: 358000, saidas: 261000 },
-];
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(value);
+};
 
-const projectionData = [
-  { month: "Fev", pessimista: 550000, base: 620000, otimista: 680000 },
-  { month: "Mar", pessimista: 510000, base: 650000, otimista: 750000 },
-  { month: "Abr", pessimista: 480000, base: 690000, otimista: 830000 },
-  { month: "Mai", pessimista: 450000, base: 740000, otimista: 920000 },
-  { month: "Jun", pessimista: 420000, base: 800000, otimista: 1020000 },
-  { month: "Jul", pessimista: 390000, base: 870000, otimista: 1130000 },
-];
-
-const transactions = [
-  { id: 1, date: "2024-01-28", description: "Recebimento - Tech Solutions", type: "entrada", category: "MRR", value: 4500 },
-  { id: 2, date: "2024-01-27", description: "Recebimento - Digital Corp", type: "entrada", category: "MRR", value: 4500 },
-  { id: 3, date: "2024-01-26", description: "Folha de Pagamento", type: "saida", category: "Pessoal", value: -85000 },
-  { id: 4, date: "2024-01-25", description: "AWS Cloud", type: "saida", category: "Infraestrutura", value: -8000 },
-  { id: 5, date: "2024-01-24", description: "Recebimento - Fintech Brasil", type: "entrada", category: "MRR", value: 4500 },
-  { id: 6, date: "2024-01-23", description: "Anthropic API", type: "saida", category: "API", value: -14200 },
-  { id: 7, date: "2024-01-22", description: "Aluguel Escritório", type: "saida", category: "Operacional", value: -8500 },
-  { id: 8, date: "2024-01-21", description: "Google Ads", type: "saida", category: "Marketing", value: -12000 },
-];
+const formatDate = (date: string) => {
+  return new Intl.DateTimeFormat("pt-BR").format(new Date(date));
+};
 
 export default function Cashflow() {
+  const { data: transactions, isLoading: isLoadingTransactions } = useTransactions();
+  const { data: metrics, isLoading: isLoadingMetrics } = useDashboardData();
+
+  if (isLoadingTransactions || isLoadingMetrics) {
+    return (
+      <AppLayout title="Fluxo de Caixa" subtitle="Gestão de entradas, saídas e previsibilidade">
+        <div className="flex h-[400px] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // Transform metrics for charts
+  const balanceEvolutionData = metrics?.map(m => ({
+    month: new Date(m.month).toLocaleDateString('pt-BR', { month: 'short' }),
+    saldo: m.revenue - m.expenses, // Simplified calculation
+    entradas: m.revenue,
+    saidas: m.expenses
+  })) || [];
+
+  // Calculate current month stats (assuming last metric is current)
+  const currentMonth = metrics?.[metrics.length - 1] || { revenue: 0, expenses: 0 };
+  const currentBalance = currentMonth.revenue - currentMonth.expenses; // Mock balance logic based on last month
+
   return (
     <AppLayout
       title="Fluxo de Caixa"
-      subtitle="Gestão de entradas, saídas e projeções"
+      subtitle="Gestão de entradas, saídas e previsibilidade"
     >
+      {/* Actions Bar */}
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Button variant="outline">
+            <Filter className="mr-2 h-4 w-4" />
+            Filtrar
+          </Button>
+          <Button variant="outline">
+            <Download className="mr-2 h-4 w-4" />
+            Exportar
+          </Button>
+        </div>
+        <Button>
+          <Plus className="mr-2 h-4 w-4" />
+          Nova Transação
+        </Button>
+      </div>
+
       {/* Metric Cards */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Saldo Atual"
-          value="R$ 598.000"
-          change={{ value: 19.4, isPositive: true }}
+          value={formatCurrency(currentBalance)}
+          change={{ value: 12.5, isPositive: true }}
           icon={Wallet}
-          description="Em caixa"
+          description="Estimado base mês atual"
         />
         <MetricCard
-          title="Entradas (30d)"
-          value="R$ 358.000"
+          title="Entradas (Mês)"
+          value={formatCurrency(currentMonth.revenue)}
           change={{ value: 8.2, isPositive: true }}
           icon={TrendingUp}
-          description="Recebimentos"
+          description="Receitas confirmadas"
         />
         <MetricCard
-          title="Saídas (30d)"
-          value="R$ 261.000"
-          change={{ value: 3.1, isPositive: true }}
+          title="Saídas (Mês)"
+          value={formatCurrency(currentMonth.expenses)}
+          change={{ value: -3.1, isPositive: false }}
           icon={TrendingDown}
-          description="Pagamentos"
+          description="Despesas realizadas"
         />
         <MetricCard
-          title="Runway"
-          value="24 meses"
-          change={{ value: 4, isPositive: true }}
-          icon={Clock}
-          description="Burn: R$ 25k/mês"
+          title="Previsão (30d)"
+          value={formatCurrency(currentBalance * 1.1)} // Mock projection
+          change={{ value: 5.4, isPositive: true }}
+          icon={DollarSign}
+          description="Fluxo projetado"
         />
       </div>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
-        {/* Balance Evolution */}
+        {/* Balance Evolution Chart */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Evolução do Saldo</CardTitle>
@@ -107,7 +123,7 @@ export default function Cashflow() {
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={balanceEvolutionData}>
                   <defs>
-                    <linearGradient id="saldoGradient" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id="colorSaldo" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
                       <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                     </linearGradient>
@@ -121,16 +137,14 @@ export default function Cashflow() {
                       border: '1px solid hsl(var(--border))',
                       borderRadius: '8px',
                     }}
-                    formatter={(value: number) => [formatCurrency(value), '']}
+                    formatter={(value: number) => [formatCurrency(value), 'Saldo']}
                   />
-                  <Legend />
                   <Area
                     type="monotone"
                     dataKey="saldo"
-                    name="Saldo"
                     stroke="hsl(var(--primary))"
-                    fill="url(#saldoGradient)"
-                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#colorSaldo)"
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -138,7 +152,7 @@ export default function Cashflow() {
           </CardContent>
         </Card>
 
-        {/* Cash Flow (Entries vs Exits) */}
+        {/* Cash Flow Chart */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Entradas vs Saídas</CardTitle>
@@ -168,114 +182,59 @@ export default function Cashflow() {
         </Card>
       </div>
 
-      {/* Projection */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between text-lg">
-            <span>Projeção de Caixa (6 meses)</span>
-            <Tabs defaultValue="6m" className="w-auto">
-              <TabsList>
-                <TabsTrigger value="3m">3 meses</TabsTrigger>
-                <TabsTrigger value="6m">6 meses</TabsTrigger>
-                <TabsTrigger value="12m">12 meses</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={projectionData}>
-                <defs>
-                  <linearGradient id="pessimistaGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="baseGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="otimistaGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v / 1000}k`} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'hsl(var(--card))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '8px',
-                  }}
-                  formatter={(value: number) => [formatCurrency(value), '']}
-                />
-                <Legend />
-                <Area type="monotone" dataKey="pessimista" name="Pessimista" stroke="hsl(var(--destructive))" fill="url(#pessimistaGradient)" strokeWidth={2} strokeDasharray="5 5" />
-                <Area type="monotone" dataKey="base" name="Base" stroke="hsl(var(--primary))" fill="url(#baseGradient)" strokeWidth={2} />
-                <Area type="monotone" dataKey="otimista" name="Otimista" stroke="hsl(var(--success))" fill="url(#otimistaGradient)" strokeWidth={2} strokeDasharray="5 5" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Transactions */}
+      {/* Recent Transactions */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center justify-between text-lg">
-            <span>Movimentações Recentes</span>
-            <Button size="sm">
-              <Plus className="mr-2 h-4 w-4" />
-              Nova Movimentação
-            </Button>
-          </CardTitle>
+          <CardTitle className="text-lg">Transações Recentes</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Data</TableHead>
-                <TableHead>Descrição</TableHead>
-                <TableHead>Categoria</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead className="text-right">Valor</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {transactions.map((tx) => (
-                <TableRow key={tx.id}>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate(tx.date)}
-                  </TableCell>
-                  <TableCell className="font-medium">{tx.description}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{tx.category}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    {tx.type === "entrada" ? (
-                      <Badge className="bg-success/10 text-success border-success/20">
-                        <ArrowUpRight className="mr-1 h-3 w-3" />
-                        Entrada
-                      </Badge>
-                    ) : (
-                      <Badge className="bg-destructive/10 text-destructive border-destructive/20">
-                        <ArrowDownRight className="mr-1 h-3 w-3" />
-                        Saída
-                      </Badge>
+          <div className="space-y-4">
+            {transactions?.map((transaction) => (
+              <div
+                key={transaction.id}
+                className="flex items-center justify-between rounded-lg border border-border p-4"
+              >
+                <div className="flex items-center gap-4">
+                  <div
+                    className={cn(
+                      "flex h-10 w-10 items-center justify-center rounded-full",
+                      transaction.type === "entrada"
+                        ? "bg-success/10 text-success"
+                        : "bg-destructive/10 text-destructive"
                     )}
-                  </TableCell>
-                  <TableCell className={cn(
-                    "text-right font-medium tabular-nums",
-                    tx.value > 0 ? "text-success" : "text-destructive"
-                  )}>
-                    {tx.value > 0 ? "+" : ""}{formatCurrency(tx.value)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                  >
+                    {transaction.type === "entrada" ? (
+                      <TrendingUp className="h-5 w-5" />
+                    ) : (
+                      <TrendingDown className="h-5 w-5" />
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-medium">{transaction.description}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {transaction.category} • {formatDate(transaction.date)}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p
+                    className={cn(
+                      "font-semibold",
+                      transaction.type === "entrada"
+                        ? "text-success"
+                        : "text-destructive"
+                    )}
+                  >
+                    {transaction.type === "entrada" ? "+" : "-"}{" "}
+                    {formatCurrency(transaction.amount)}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {transaction.status === "completed" ? "Confirmado" : "Pendente"}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
     </AppLayout>

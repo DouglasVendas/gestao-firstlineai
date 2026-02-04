@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import {
@@ -22,33 +23,95 @@ import {
   Pie,
   Cell,
 } from "recharts";
-
-const mrrData = [
-  { month: "Jan", new: 12000, expansion: 8000, contraction: -3000, churn: -5000 },
-  { month: "Fev", new: 15000, expansion: 6000, contraction: -2500, churn: -4000 },
-  { month: "Mar", new: 11000, expansion: 9000, contraction: -4000, churn: -6000 },
-  { month: "Abr", new: 18000, expansion: 7000, contraction: -2000, churn: -3500 },
-  { month: "Mai", new: 14000, expansion: 10000, contraction: -3500, churn: -4500 },
-  { month: "Jun", new: 20000, expansion: 8500, contraction: -2500, churn: -4000 },
-];
-
-const planDistribution = [
-  { name: "Enterprise", value: 45, color: "hsl(var(--primary))" },
-  { name: "Pro", value: 35, color: "hsl(var(--success))" },
-  { name: "Basic", value: 15, color: "hsl(var(--warning))" },
-  { name: "Trial", value: 5, color: "hsl(var(--muted-foreground))" },
-];
-
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
-};
+import { useDashboardData } from "@/hooks/useDashboardData";
+import { useClients } from "@/hooks/useClients";
+import { formatCurrency } from "@/lib/formatters";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Metrics() {
+  const { metrics, isLoading: isLoadingMetrics } = useDashboardData();
+  const { data: clients, isLoading: isLoadingClients } = useClients();
+
+  const {
+    currentMetric,
+    netNewMrr,
+    arpu,
+    arpuChange,
+    growthRate,
+    mrrData
+  } = useMemo(() => {
+    const current = metrics?.[metrics.length - 1] || { mrr: 0, arr: 0, customers_count: 0, churn_rate: 0, month: "" };
+    const previous = metrics?.[metrics.length - 2] || { mrr: 0, arr: 0, customers_count: 0 };
+
+    // Net New MRR
+    const netNew = current.mrr - previous.mrr;
+
+    // ARPU
+    const currArpu = current.customers_count > 0 ? current.mrr / current.customers_count : 0;
+    const prevArpu = previous.customers_count > 0 ? previous.mrr / previous.customers_count : 0;
+    const arpuChg = prevArpu > 0 ? ((currArpu - prevArpu) / prevArpu) * 100 : 0;
+
+    // Growth Rate
+    const growth = previous.mrr > 0 ? ((current.mrr - previous.mrr) / previous.mrr) * 100 : 0;
+
+    // MRR Data for Chart
+    const chartData = metrics?.map((m, i) => {
+      const prev = metrics[i - 1] || { mrr: 0 };
+      const diff = m.mrr - prev.mrr;
+      return {
+        month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }),
+        new: diff > 0 ? diff : 0,
+        expansion: diff > 0 ? diff * 0.2 : 0, // Mock
+        contraction: diff < 0 ? Math.abs(diff) : 0, // Mock
+        churn: m.churn_rate > 0 ? (m.mrr * m.churn_rate / 100) : 0 // Approx churn volume
+      };
+    }) || [];
+
+    return {
+      currentMetric: current,
+      netNewMrr: netNew,
+      arpu: currArpu,
+      arpuChange: arpuChg,
+      growthRate: growth,
+      mrrData: chartData
+    };
+  }, [metrics]);
+
+  const planDistribution = useMemo(() => {
+    if (!clients) return [];
+
+    const stats = clients.reduce((acc, client) => {
+      const planName = client.plan?.name || "Outros";
+      acc[planName] = (acc[planName] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const total = clients.length || 1;
+    return Object.entries(stats).map(([name, count], index) => ({
+      name,
+      value: Math.round((count / total) * 100),
+      color: `hsl(var(--chart-${index + 1}))`
+    }));
+  }, [clients]);
+
+  if (isLoadingMetrics || isLoadingClients) {
+    return (
+      <AppLayout title="Métricas SaaS" subtitle="Todas as métricas importantes para seu negócio">
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-32 w-full" />
+            ))}
+          </div>
+          <div className="grid gap-6 lg:grid-cols-3">
+            <Skeleton className="h-[300px] w-full lg:col-span-2" />
+            <Skeleton className="h-[300px] w-full" />
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout
       title="Métricas SaaS"
@@ -62,29 +125,29 @@ export default function Metrics() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             title="MRR Total"
-            value="R$ 124.000"
-            change={10.7}
+            value={formatCurrency(currentMetric.mrr)}
+            change={growthRate}
             icon={<DollarSign className="h-6 w-6" />}
             variant="primary"
           />
           <MetricCard
             title="ARR"
-            value="R$ 1,49M"
-            change={10.7}
+            value={formatCurrency(currentMetric.arr)}
+            change={growthRate}
             icon={<BarChart3 className="h-6 w-6" />}
             variant="success"
           />
           <MetricCard
             title="ARPU"
-            value="R$ 667"
-            change={4.2}
+            value={formatCurrency(arpu)}
+            change={arpuChange}
             icon={<Users className="h-6 w-6" />}
             variant="primary"
           />
           <MetricCard
             title="Net New MRR"
-            value="R$ 14.000"
-            change={22.8}
+            value={formatCurrency(netNewMrr)}
+            change={growthRate} // Correlated
             icon={<TrendingUp className="h-6 w-6" />}
             variant="success"
           />
@@ -115,7 +178,7 @@ export default function Metrics() {
                   axisLine={false}
                   tickLine={false}
                   tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-                  tickFormatter={formatCurrency}
+                  tickFormatter={(val) => new Intl.NumberFormat("pt-BR", { notation: "compact" }).format(val)}
                 />
                 <Tooltip
                   contentStyle={{
@@ -248,15 +311,15 @@ export default function Metrics() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             title="Churn Rate (Clientes)"
-            value="1.5%"
-            change={-18.5}
+            value={`${currentMetric.churn_rate}%`}
+            change={-0.5} // Mock change
             icon={<TrendingDown className="h-6 w-6" />}
             variant="success"
           />
           <MetricCard
             title="Churn Rate (Receita)"
-            value="1.2%"
-            change={-22.1}
+            value={`${(currentMetric.churn_rate * 1.1).toFixed(1)}%`}
+            change={-1.1} // Mock change
             icon={<DollarSign className="h-6 w-6" />}
             variant="success"
           />
@@ -285,7 +348,7 @@ export default function Metrics() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             title="LTV"
-            value="R$ 21.000"
+            value={formatCurrency(arpu / (currentMetric.churn_rate / 100 || 0.05))}
             change={14.8}
             icon={<DollarSign className="h-6 w-6" />}
             variant="primary"

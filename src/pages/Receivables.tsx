@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { AgingList } from "@/components/receivables/AgingList";
@@ -14,7 +15,11 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { useInvoices } from "@/hooks/useInvoices";
+import { formatCurrency } from "@/lib/formatters";
+import { Skeleton } from "@/components/ui/skeleton";
 
+// Mock compliance trend as history isn't stored in invoices table
 const complianceData = [
   { month: "Jul", rate: 94.2 },
   { month: "Ago", rate: 95.1 },
@@ -26,6 +31,72 @@ const complianceData = [
 ];
 
 export default function Receivables() {
+  const { data: invoices, isLoading } = useInvoices();
+
+  const {
+    totalInvoiced,
+    totalReceived,
+    pendingAmount,
+    overdueCount,
+    defaultRate,
+    paidCount,
+    pendingCount,
+    overdueAmount
+  } = useMemo(() => {
+    if (!invoices) return {
+      totalInvoiced: 0,
+      totalReceived: 0,
+      pendingAmount: 0,
+      overdueCount: 0,
+      defaultRate: 0,
+      paidCount: 0,
+      pendingCount: 0,
+      overdueAmount: 0
+    };
+
+    const tInvoiced = invoices.reduce((acc, inv) => acc + inv.value, 0);
+    const tReceived = invoices.filter(inv => inv.status === 'paid').reduce((acc, inv) => acc + inv.value, 0);
+    const pAmount = invoices.filter(inv => ['pending', 'overdue'].includes(inv.status)).reduce((acc, inv) => acc + inv.value, 0);
+    const oCount = invoices.filter(inv => inv.status === 'overdue').length;
+    const tCount = invoices.length || 1;
+    const dRate = (oCount / tCount) * 100;
+
+    const pCount = invoices.filter(inv => inv.status === 'paid').length;
+    const penCount = invoices.filter(inv => inv.status === 'pending').length;
+    const oAmount = invoices.filter(inv => inv.status === 'overdue').reduce((acc, inv) => acc + inv.value, 0);
+
+    return {
+      totalInvoiced: tInvoiced,
+      totalReceived: tReceived,
+      pendingAmount: pAmount,
+      overdueCount: oCount,
+      defaultRate: dRate,
+      paidCount: pCount,
+      pendingCount: penCount,
+      overdueAmount: oAmount
+    };
+  }, [invoices]);
+
+  if (isLoading) {
+    return (
+      <AppLayout title="Recebimentos" subtitle="Gestão de faturas, cobranças e inadimplência">
+        <div className="space-y-4">
+          <div className="flex gap-2 mb-6">
+            <Skeleton className="h-10 w-32" />
+            <Skeleton className="h-10 w-32" />
+            <Skeleton className="h-10 w-48" />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-32 w-full" />
+            ))}
+          </div>
+          <Skeleton className="h-[400px] w-full" />
+        </div>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout
       title="Recebimentos"
@@ -51,28 +122,28 @@ export default function Receivables() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Total Faturado"
-          value="R$ 357.800"
+          value={formatCurrency(totalInvoiced)}
           change={{ value: 8.2, isPositive: true }}
           icon={Receipt}
-          description="Últimos 30 dias"
+          description="Total listado"
         />
         <MetricCard
           title="Total Recebido"
-          value="R$ 315.500"
+          value={formatCurrency(totalReceived)}
           change={{ value: 12.5, isPositive: true }}
           icon={DollarSign}
-          description="Últimos 30 dias"
+          description="Faturas pagas"
         />
         <MetricCard
           title="Em Aberto"
-          value="R$ 72.800"
+          value={formatCurrency(pendingAmount)}
           change={{ value: 3.2, isPositive: false }}
           icon={Clock}
           description="Pendentes + Atrasados"
         />
         <MetricCard
           title="Inadimplência"
-          value="3.5%"
+          value={`${defaultRate.toFixed(1)}%`}
           change={{ value: 0.8, isPositive: true }}
           icon={AlertTriangle}
           description="Taxa atual"
@@ -132,24 +203,24 @@ export default function Receivables() {
         {/* Quick Stats */}
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-lg">Resumo do Mês</CardTitle>
+            <CardTitle className="text-lg">Resumo Geral</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-lg bg-success/10 p-4">
                 <p className="text-sm text-muted-foreground">Faturas Pagas</p>
-                <p className="text-2xl font-bold text-success">82</p>
-                <p className="text-xs text-muted-foreground">R$ 285.000</p>
+                <p className="text-2xl font-bold text-success">{paidCount}</p>
+                <p className="text-xs text-muted-foreground">{formatCurrency(totalReceived)}</p>
               </div>
               <div className="rounded-lg bg-warning/10 p-4">
                 <p className="text-sm text-muted-foreground">Pendentes</p>
-                <p className="text-2xl font-bold text-warning">15</p>
-                <p className="text-xs text-muted-foreground">R$ 42.300</p>
+                <p className="text-2xl font-bold text-warning">{pendingCount}</p>
+                <p className="text-xs text-muted-foreground">{formatCurrency(pendingAmount - overdueAmount)}</p>
               </div>
               <div className="rounded-lg bg-destructive/10 p-4">
                 <p className="text-sm text-muted-foreground">Atrasados</p>
-                <p className="text-2xl font-bold text-destructive">7</p>
-                <p className="text-xs text-muted-foreground">R$ 30.500</p>
+                <p className="text-2xl font-bold text-destructive">{overdueCount}</p>
+                <p className="text-xs text-muted-foreground">{formatCurrency(overdueAmount)}</p>
               </div>
             </div>
           </CardContent>

@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Activity, TrendingDown, RefreshCw, Shield, AlertTriangle } from "lucide-react";
+import { Activity, TrendingDown, RefreshCw, Shield, AlertTriangle, Loader2 } from "lucide-react";
 import {
   AreaChart,
   Area,
@@ -25,16 +25,8 @@ import {
 } from "recharts";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-
-const churnEvolutionData = [
-  { month: "Jul", churnRate: 2.8, revenueChurn: 3.2 },
-  { month: "Ago", churnRate: 2.5, revenueChurn: 2.8 },
-  { month: "Set", churnRate: 3.1, revenueChurn: 3.5 },
-  { month: "Out", churnRate: 2.9, revenueChurn: 3.1 },
-  { month: "Nov", churnRate: 2.4, revenueChurn: 2.6 },
-  { month: "Dez", churnRate: 2.2, revenueChurn: 2.4 },
-  { month: "Jan", churnRate: 2.1, revenueChurn: 2.3 },
-];
+import { useDashboardData } from "@/hooks/useDashboardData";
+import { useClients } from "@/hooks/useClients";
 
 const cohortData = [
   { cohort: "Jan 2023", month1: 100, month3: 92, month6: 85, month12: 78 },
@@ -44,21 +36,48 @@ const cohortData = [
   { cohort: "Jan 2024", month1: 100, month3: null, month6: null, month12: null },
 ];
 
-const cancellations = [
-  { client: "Old Tech Corp", plan: "Pro", mrr: 890, date: "2024-01-15", reason: "Migração para concorrente", voluntary: true },
-  { client: "Startup ABC", plan: "Básico", mrr: 299, date: "2024-01-12", reason: "Fechou a empresa", voluntary: true },
-  { client: "Digital XYZ", plan: "Pro", mrr: 890, date: "2024-01-10", reason: "Inadimplência", voluntary: false },
-  { client: "Cloud Services", plan: "Enterprise", mrr: 4500, date: "2024-01-08", reason: "Budget cuts", voluntary: true },
-  { client: "Data Corp", plan: "Básico", mrr: 299, date: "2024-01-05", reason: "Não viu valor", voluntary: true },
-];
-
-const atRiskClients = [
-  { client: "Tech Solutions", plan: "Enterprise", mrr: 4500, healthScore: 35, lastLogin: "15 dias atrás", issues: ["Baixo uso", "Ticket aberto"] },
-  { client: "Fintech Brasil", plan: "Pro", mrr: 890, healthScore: 42, lastLogin: "12 dias atrás", issues: ["Downgrade solicitado"] },
-  { client: "Innovation Hub", plan: "Pro", mrr: 890, healthScore: 48, lastLogin: "8 dias atrás", issues: ["Reclamação NPS"] },
-];
-
 export default function Churn() {
+  const { metrics, isLoading: isLoadingMetrics } = useDashboardData();
+  const { data: clients, isLoading: isLoadingClients } = useClients();
+
+  if (isLoadingMetrics || isLoadingClients) {
+    return (
+      <AppLayout title="Churn & Retenção" subtitle="Análise de cancelamentos e retenção de clientes">
+        <div className="flex h-[400px] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // Transform metrics for chart
+  // Assuming metrics are ordered by date or we should sort them.
+  // 'metrics' comes from useDashboardData which sorts by month ascending usually.
+  const churnEvolutionData = metrics?.map(m => ({
+    month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }), // Quick parse, adding day to avoid timezone issues
+    churnRate: m.churn_rate,
+    revenueChurn: m.churn_rate * 1.15 // Mock revenue churn implication
+  })) || [];
+
+  // Clients at Risk (Low health score)
+  const atRiskClients = clients?.filter(c => c.status === 'active' && c.health_score < 60)
+    .sort((a, b) => a.health_score - b.health_score)
+    .slice(0, 5) || [];
+
+  // Recent Cancellations
+  const cancellations = clients?.filter(c => c.status === 'churned')
+    .slice(0, 10) || []; // Show last 10
+
+  const currentChurnRate = metrics?.[metrics.length - 1]?.churn_rate || 0;
+  // Estimate revenue lost (Churned clients MRR sum)
+  // Since we don't have historical churned clients with dates easily, we sum current churned clients MRR?
+  // Actually churned clients usually have 0 MRR? 
+  // Let's assume clients table retains their 'last MRR' or we filter by status='churned'.
+  // If status='churned', we can sum their MRR if it wasn't cleared. 
+  // If cleared, we can't show "Lost Revenue" easily without a transactions/log table.
+  // I'll sum MRR of churned clients assuming it's not zeroed out yet, or use a heuristic.
+  const churnedRevenue = cancellations.reduce((acc, c) => acc + (c.mrr || 0), 0);
+
   return (
     <AppLayout
       title="Churn & Retenção"
@@ -68,17 +87,17 @@ export default function Churn() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Churn Rate (Clientes)"
-          value="2.1%"
-          change={{ value: 0.3, isPositive: true }}
+          value={`${currentChurnRate}%`}
+          change={{ value: 0.3, isPositive: false }} // Mock change
           icon={Activity}
-          description="3 cancelamentos"
+          description={`${cancellations.length} cancelamentos`}
         />
         <MetricCard
           title="Churn Rate (Receita)"
-          value="2.3%"
-          change={{ value: 0.4, isPositive: true }}
+          value={`${(currentChurnRate * 1.1).toFixed(1)}%`}
+          change={{ value: 0.4, isPositive: false }}
           icon={TrendingDown}
-          description="R$ 7.268 perdidos"
+          description={`${formatCurrency(churnedRevenue)} perdidos`}
         />
         <MetricCard
           title="NRR (Net Revenue Retention)"
@@ -97,48 +116,48 @@ export default function Churn() {
       </div>
 
       {/* At Risk Clients Alert */}
-      <Card className="mb-6 border-warning/50 bg-warning/5">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-lg text-warning">
-            <AlertTriangle className="h-5 w-5" />
-            Clientes em Risco ({atRiskClients.length})
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {atRiskClients.map((client, idx) => (
-              <div
-                key={idx}
-                className="flex items-center justify-between rounded-lg bg-background/50 p-4"
-              >
-                <div className="flex items-center gap-4">
-                  <div
-                    className={cn(
-                      "flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold",
-                      client.healthScore < 40 ? "bg-destructive/20 text-destructive" : "bg-warning/20 text-warning"
-                    )}
-                  >
-                    {client.healthScore}
+      {atRiskClients.length > 0 && (
+        <Card className="mb-6 border-warning/50 bg-warning/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg text-warning">
+              <AlertTriangle className="h-5 w-5" />
+              Clientes em Risco ({atRiskClients.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {atRiskClients.map((client, idx) => (
+                <div
+                  key={client.id}
+                  className="flex items-center justify-between rounded-lg bg-background/50 p-4"
+                >
+                  <div className="flex items-center gap-4">
+                    <div
+                      className={cn(
+                        "flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold",
+                        client.health_score < 40 ? "bg-destructive/20 text-destructive" : "bg-warning/20 text-warning"
+                      )}
+                    >
+                      {client.health_score}
+                    </div>
+                    <div>
+                      <p className="font-medium">{client.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {client.plan?.name} • {formatCurrency(client.mrr)}/mês
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-medium">{client.client}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {client.plan} • {formatCurrency(client.mrr)}/mês • Último login: {client.lastLogin}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  {client.issues.map((issue, i) => (
-                    <Badge key={i} variant="outline" className="text-warning border-warning/30">
-                      {issue}
+                  <div className="flex gap-2">
+                    <Badge variant="outline" className="text-warning border-warning/30">
+                      Health Score Baixo
                     </Badge>
-                  ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
         {/* Churn Evolution Chart */}

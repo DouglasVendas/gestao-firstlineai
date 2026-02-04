@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calculator, TrendingUp, DollarSign, Target, BarChart3 } from "lucide-react";
+import { Calculator, TrendingUp, DollarSign, Target, BarChart3, Loader2 } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -22,6 +22,7 @@ import {
 } from "recharts";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { useDashboardData } from "@/hooks/useDashboardData";
 
 const sensitivityData = [
   { multiplo: "8x", conservador: 28800000, base: 33600000, otimista: 38400000 },
@@ -40,6 +41,7 @@ const waterfallData = [
 ];
 
 export default function Valuation() {
+  const { metrics, isLoading } = useDashboardData();
   const [inputs, setInputs] = useState({
     arr: 4200000,
     growthRate: 85,
@@ -49,6 +51,37 @@ export default function Valuation() {
     wacc: 15,
     terminalGrowth: 3,
   });
+
+  useEffect(() => {
+    if (metrics && metrics.length > 0) {
+      const current = metrics[metrics.length - 1];
+      const previous = metrics[metrics.length - 13] || metrics[0]; // Try to get YoY or fallback to start
+
+      const arr = current.arr || (current.mrr * 12) || 0;
+      let growthRate = 0;
+      if (previous.arr > 0) {
+        growthRate = ((arr - previous.arr) / previous.arr) * 100;
+      } else if (previous.mrr > 0) {
+        growthRate = (((current.mrr || 0) - previous.mrr) / previous.mrr) * 100;
+      }
+
+      setInputs(prev => ({
+        ...prev,
+        arr: arr,
+        growthRate: Math.round(growthRate) || 0
+      }));
+    }
+  }, [metrics]);
+
+  if (isLoading) {
+    return (
+      <AppLayout title="Valuation" subtitle="Calculadora de valuation e análise de cenários">
+        <div className="flex h-[400px] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </AppLayout>
+    );
+  }
 
   const baseValuation = inputs.arr * inputs.multiplo;
   const growthAdjustment = inputs.growthRate > 50 ? 0.2 : inputs.growthRate > 30 ? 0.1 : 0;
@@ -355,8 +388,8 @@ export default function Valuation() {
                         entry.isTotal
                           ? 'hsl(var(--primary))'
                           : entry.value >= 0
-                          ? 'hsl(var(--success))'
-                          : 'hsl(var(--destructive))'
+                            ? 'hsl(var(--success))'
+                            : 'hsl(var(--destructive))'
                       }
                     />
                   ))}

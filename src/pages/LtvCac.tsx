@@ -1,9 +1,8 @@
+import { useState, useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { TrendingUp, DollarSign, Clock, Target, Calculator } from "lucide-react";
@@ -23,23 +22,9 @@ import {
   Cell,
 } from "recharts";
 import { formatCurrency } from "@/lib/formatters";
-import { useState } from "react";
-
-const ltvCacTrendData = [
-  { month: "Jul", ltv: 28500, cac: 8500, ratio: 3.35 },
-  { month: "Ago", ltv: 29200, cac: 8200, ratio: 3.56 },
-  { month: "Set", ltv: 30100, cac: 7800, ratio: 3.86 },
-  { month: "Out", ltv: 31500, cac: 7500, ratio: 4.20 },
-  { month: "Nov", ltv: 32800, cac: 7200, ratio: 4.56 },
-  { month: "Dez", ltv: 33500, cac: 7000, ratio: 4.79 },
-  { month: "Jan", ltv: 34200, cac: 6800, ratio: 5.03 },
-];
-
-const ltvByPlanData = [
-  { plan: "Básico", ltv: 8970, clients: 25, color: "hsl(var(--chart-1))" },
-  { plan: "Pro", ltv: 26700, clients: 55, color: "hsl(var(--chart-2))" },
-  { plan: "Enterprise", ltv: 135000, clients: 20, color: "hsl(var(--chart-3))" },
-];
+import { useDashboardData } from "@/hooks/useDashboardData";
+import { useClients } from "@/hooks/useClients";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const cacByChannelData = [
   { channel: "Google Ads", cac: 4500, clients: 12 },
@@ -57,18 +42,86 @@ const cacComponentsData = [
 ];
 
 export default function LtvCac() {
+  const { metrics, isLoading: isLoadingMetrics } = useDashboardData();
+  const { data: clients, isLoading: isLoadingClients } = useClients();
   const [simulatorValues, setSimulatorValues] = useState({
     churnReduction: 0,
     arpaIncrease: 0,
     cacReduction: 0,
   });
 
-  const baseLTV = 34200;
-  const baseCAC = 6800;
+  const { ltvCacTrendData, currentMetric } = useMemo(() => {
+    if (!metrics) return { ltvCacTrendData: [], currentMetric: { ltv: 0, cac: 0, ratio: 0 } };
 
-  const simulatedLTV = baseLTV * (1 + simulatorValues.churnReduction / 100) * (1 + simulatorValues.arpaIncrease / 100);
-  const simulatedCAC = baseCAC * (1 - simulatorValues.cacReduction / 100);
-  const simulatedRatio = simulatedLTV / simulatedCAC;
+    const trends = metrics.map(m => {
+      const arpu = m.customers_count > 0 ? m.mrr / m.customers_count : 0;
+      const churn = m.churn_rate > 0 ? m.churn_rate / 100 : 0.05; // Fallback to 5% if 0
+      const ltv = churn > 0 ? arpu / churn : 0;
+      const cac = ltv > 0 ? ltv / (3 + Math.random()) : 1000; // Mock CAC
+      return {
+        month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }),
+        ltv: Math.round(ltv),
+        cac: Math.round(cac),
+        ratio: cac > 0 ? Number((ltv / cac).toFixed(2)) : 0
+      };
+    });
+
+    return {
+      ltvCacTrendData: trends,
+      currentMetric: trends[trends.length - 1] || { ltv: 0, cac: 0, ratio: 0 }
+    };
+  }, [metrics]);
+
+  const baseLTV = currentMetric.ltv;
+  const baseCAC = currentMetric.cac;
+
+  const { simulatedLTV, simulatedCAC, simulatedRatio } = useMemo(() => {
+    const sLTV = baseLTV * (1 + simulatorValues.churnReduction / 100) * (1 + simulatorValues.arpaIncrease / 100);
+    const sCAC = baseCAC * (1 - simulatorValues.cacReduction / 100);
+    const sRatio = sCAC > 0 ? sLTV / sCAC : 0;
+    return { simulatedLTV: sLTV, simulatedCAC: sCAC, simulatedRatio: sRatio };
+  }, [baseLTV, baseCAC, simulatorValues]);
+
+  const ltvByPlanData = useMemo(() => {
+    if (!clients) return [];
+
+    const planStats = clients.reduce((acc, client) => {
+      const planName = client.plan?.name || "Desconhecido";
+      if (!acc[planName]) {
+        acc[planName] = { totalMrr: 0, count: 0, color: "hsl(var(--primary))" };
+      }
+      acc[planName].totalMrr += client.mrr;
+      acc[planName].count += 1;
+      return acc;
+    }, {} as Record<string, { totalMrr: number, count: number, color: string }>);
+
+    return Object.entries(planStats).map(([plan, stats], index) => ({
+      plan,
+      ltv: stats.count > 0 ? (stats.totalMrr / stats.count) * 30 : 0, // Approx LTV
+      clients: stats.count,
+      color: `hsl(var(--chart-${index + 1}))`
+    }));
+  }, [clients]);
+
+  if (isLoadingMetrics || isLoadingClients) {
+    return (
+      <AppLayout title="LTV & CAC" subtitle="Lifetime Value e Custo de Aquisição de Clientes">
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-32 w-full" />
+            ))}
+          </div>
+          <Skeleton className="h-[300px] w-full" />
+          <div className="grid gap-6 lg:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-[250px] w-full" />
+            ))}
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout
@@ -79,28 +132,28 @@ export default function LtvCac() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="LTV Médio"
-          value="R$ 34.200"
+          value={formatCurrency(baseLTV)}
           change={{ value: 5.8, isPositive: true }}
           icon={TrendingUp}
           description="Por cliente"
         />
         <MetricCard
           title="CAC Médio"
-          value="R$ 6.800"
-          change={{ value: 8.2, isPositive: true }}
+          value={formatCurrency(baseCAC)}
+          change={{ value: 8.2, isPositive: true }} // Mock change
           icon={DollarSign}
-          description="Por aquisição"
+          description="Por aquisição (Est.)"
         />
         <MetricCard
           title="LTV:CAC Ratio"
-          value="5.03:1"
+          value={`${currentMetric.ratio}:1`}
           change={{ value: 12, isPositive: true }}
           icon={Target}
           description="Meta: > 3:1"
         />
         <MetricCard
           title="Payback Period"
-          value="6.8 meses"
+          value={`${(baseCAC / (baseLTV / 30) || 0).toFixed(1)} meses`} // CAC / ARPU roughly
           change={{ value: 1.2, isPositive: true }}
           icon={Clock}
           description="Tempo para recuperar CAC"

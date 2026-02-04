@@ -7,21 +7,8 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-
-const data = [
-  { month: "Jan", mrr: 45000, arr: 540000 },
-  { month: "Fev", mrr: 52000, arr: 624000 },
-  { month: "Mar", mrr: 58000, arr: 696000 },
-  { month: "Abr", mrr: 63000, arr: 756000 },
-  { month: "Mai", mrr: 71000, arr: 852000 },
-  { month: "Jun", mrr: 78000, arr: 936000 },
-  { month: "Jul", mrr: 85000, arr: 1020000 },
-  { month: "Ago", mrr: 92000, arr: 1104000 },
-  { month: "Set", mrr: 98000, arr: 1176000 },
-  { month: "Out", mrr: 105000, arr: 1260000 },
-  { month: "Nov", mrr: 112000, arr: 1344000 },
-  { month: "Dez", mrr: 124000, arr: 1488000 },
-];
+import { useDashboardData } from "@/hooks/useDashboardData";
+import { Loader2 } from "lucide-react";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -58,6 +45,23 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export function RevenueChart() {
+  const { data: metrics, isLoading } = useDashboardData();
+
+  if (isLoading) {
+    return (
+      <div className="metric-card flex h-[400px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  const chartData = metrics?.map(m => ({
+    month: new Date(m.month).toLocaleDateString('pt-BR', { month: 'short' }),
+    mrr: m.mrr,
+    arr: m.arr,
+    // Ensure numeric values
+  })) || [];
+
   return (
     <div className="metric-card animate-slide-up">
       <div className="mb-6 flex items-center justify-between">
@@ -81,7 +85,7 @@ export function RevenueChart() {
 
       <div className="chart-container">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data}>
+          <AreaChart data={chartData}>
             <defs>
               <linearGradient id="colorMrr" x1="0" y1="0" x2="0" y2="1">
                 <stop

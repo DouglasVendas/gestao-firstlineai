@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { VariableCostsTable } from "@/components/costs/VariableCostsTable";
@@ -15,7 +16,11 @@ import {
   Pie,
   Cell,
 } from "recharts";
+import { useVariableCosts } from "@/hooks/useVariableCosts";
+import { formatCurrency } from "@/lib/formatters";
+import { Skeleton } from "@/components/ui/skeleton";
 
+// Mock historical data as DB only has snapshot
 const monthlyData = [
   { month: "Jul", apis: 18500, cloud: 18200, gateway: 9800 },
   { month: "Ago", apis: 19200, cloud: 18800, gateway: 10200 },
@@ -26,18 +31,48 @@ const monthlyData = [
   { month: "Jan", apis: 23000, cloud: 20700, gateway: 11500 },
 ];
 
-const categoryData = [
-  { name: "APIs de IA", value: 23000, color: "hsl(var(--chart-1))" },
-  { name: "Cloud", value: 20700, color: "hsl(var(--chart-2))" },
-  { name: "Gateway", value: 11500, color: "hsl(var(--chart-3))" },
-];
-
 const alerts = [
   { client: "Tech Solutions", service: "Anthropic", increase: 45, message: "Consumo 45% acima da média" },
   { client: "Digital Corp", service: "AWS", increase: 28, message: "Pico de storage detectado" },
 ];
 
+const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
+
 export default function VariableCosts() {
+  const { data: costs, isLoading } = useVariableCosts();
+
+  const { totalVariableCosts, categoryData } = useMemo(() => {
+    if (!costs) return { totalVariableCosts: 0, categoryData: [] };
+
+    const total = costs.reduce((acc, c) => acc + c.amount, 0);
+    const catData = costs.map((c, index) => ({
+      name: c.category,
+      value: c.amount,
+      color: COLORS[index % COLORS.length]
+    }));
+
+    return { totalVariableCosts: total, categoryData: catData };
+  }, [costs]);
+
+  if (isLoading) {
+    return (
+      <AppLayout title="Custos Variáveis" subtitle="Gestão de custos proporcionais ao uso e consumo">
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-32 w-full" />
+            ))}
+          </div>
+          <div className="grid gap-6 lg:grid-cols-3">
+            <Skeleton className="h-[300px] w-full lg:col-span-2" />
+            <Skeleton className="h-[300px] w-full" />
+          </div>
+          <Skeleton className="h-[200px] w-full" />
+        </div>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout
       title="Custos Variáveis"
@@ -47,28 +82,28 @@ export default function VariableCosts() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Total Custos Variáveis"
-          value="R$ 55.200"
+          value={formatCurrency(totalVariableCosts)}
           change={{ value: 4.5, isPositive: false }}
           icon={TrendingDown}
           description="Este mês"
         />
         <MetricCard
           title="Margem de Contribuição"
-          value="82.5%"
+          value="82.5%" // Calculated field requiring Revenue - VarCosts. Static for now.
           change={{ value: 1.2, isPositive: true }}
           icon={Percent}
           description="Receita - Custos Var."
         />
         <MetricCard
           title="Custo Médio por Cliente"
-          value="R$ 552"
+          value="R$ 552" // Static. Requires active clients count.
           change={{ value: 2.1, isPositive: false }}
           icon={Users}
           description="100 clientes ativos"
         />
         <MetricCard
           title="Alertas Ativos"
-          value="2"
+          value={alerts.length.toString()}
           change={{ value: 1, isPositive: false }}
           icon={AlertTriangle}
           description="Consumo anômalo"

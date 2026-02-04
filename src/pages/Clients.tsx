@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,137 +10,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, Search, Filter, Download, MoreHorizontal } from "lucide-react";
-import { cn } from "@/lib/utils";
-
-interface Client {
-  id: string;
-  name: string;
-  cnpj: string;
-  plan: string;
-  mrr: number;
-  arr: number;
-  status: "active" | "trial" | "churned" | "inactive";
-  startDate: string;
-  renewalDate: string;
-  healthScore: number;
-  paymentMethod: string;
-}
-
-const clients: Client[] = [
-  {
-    id: "1",
-    name: "TechCorp Brasil",
-    cnpj: "12.345.678/0001-90",
-    plan: "Enterprise",
-    mrr: 12500,
-    arr: 150000,
-    status: "active",
-    startDate: "2023-03-15",
-    renewalDate: "2024-03-15",
-    healthScore: 92,
-    paymentMethod: "Cartão",
-  },
-  {
-    id: "2",
-    name: "Startup Inovação",
-    cnpj: "98.765.432/0001-10",
-    plan: "Pro",
-    mrr: 2990,
-    arr: 35880,
-    status: "active",
-    startDate: "2023-06-01",
-    renewalDate: "2024-06-01",
-    healthScore: 78,
-    paymentMethod: "Boleto",
-  },
-  {
-    id: "3",
-    name: "Consultoria ABC",
-    cnpj: "11.222.333/0001-44",
-    plan: "Pro",
-    mrr: 2990,
-    arr: 35880,
-    status: "trial",
-    startDate: "2024-01-05",
-    renewalDate: "-",
-    healthScore: 65,
-    paymentMethod: "-",
-  },
-  {
-    id: "4",
-    name: "E-commerce Plus",
-    cnpj: "55.666.777/0001-88",
-    plan: "Enterprise",
-    mrr: 8900,
-    arr: 106800,
-    status: "active",
-    startDate: "2023-01-10",
-    renewalDate: "2024-01-10",
-    healthScore: 88,
-    paymentMethod: "PIX",
-  },
-  {
-    id: "5",
-    name: "Agência Digital",
-    cnpj: "33.444.555/0001-66",
-    plan: "Basic",
-    mrr: 0,
-    arr: 0,
-    status: "churned",
-    startDate: "2023-08-20",
-    renewalDate: "-",
-    healthScore: 15,
-    paymentMethod: "Boleto",
-  },
-  {
-    id: "6",
-    name: "Fintech Solutions",
-    cnpj: "77.888.999/0001-22",
-    plan: "Enterprise",
-    mrr: 15000,
-    arr: 180000,
-    status: "active",
-    startDate: "2022-11-01",
-    renewalDate: "2024-11-01",
-    healthScore: 95,
-    paymentMethod: "Cartão",
-  },
-  {
-    id: "7",
-    name: "LogTech Brasil",
-    cnpj: "44.555.666/0001-77",
-    plan: "Pro",
-    mrr: 4990,
-    arr: 59880,
-    status: "active",
-    startDate: "2023-09-15",
-    renewalDate: "2024-09-15",
-    healthScore: 82,
-    paymentMethod: "PIX",
-  },
-];
-
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value);
-};
-
-const formatDate = (date: string) => {
-  if (date === "-") return "-";
-  return new Intl.DateTimeFormat("pt-BR").format(new Date(date));
-};
-
-const getStatusBadge = (status: Client["status"]) => {
-  const config = {
-    active: { label: "Ativo", class: "status-badge-active" },
-    trial: { label: "Trial", class: "status-badge-trial" },
-    churned: { label: "Cancelado", class: "status-badge-churned" },
-    inactive: { label: "Inativo", class: "status-badge-inactive" },
-  };
-  return config[status];
-};
+import { useClients } from "@/hooks/useClients";
+import { ClientStatusBadge } from "@/components/clients/ClientStatusBadge";
+import { formatCurrency, formatDate } from "@/lib/formatters";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const getHealthScoreColor = (score: number) => {
   if (score >= 80) return "text-success";
@@ -148,11 +22,41 @@ const getHealthScoreColor = (score: number) => {
 };
 
 export default function Clients() {
+  const { data: clients, isLoading } = useClients();
+
+  const { activeClients, trialClients, churnedClients } = useMemo(() => {
+    if (!clients) return { activeClients: 0, trialClients: 0, churnedClients: 0 };
+    return {
+      activeClients: clients.filter((c) => c.status === "active").length,
+      trialClients: clients.filter((c) => c.status === "trial").length,
+      churnedClients: clients.filter((c) => c.status === "churned").length,
+    };
+  }, [clients]);
+
+  if (isLoading) {
+    return (
+      <AppLayout title="Clientes" subtitle="Gestão de clientes e contratos">
+        <div className="space-y-4">
+          <div className="flex justify-between">
+            <Skeleton className="h-10 w-64" />
+            <div className="flex gap-2">
+              <Skeleton className="h-10 w-24" />
+              <Skeleton className="h-10 w-32" />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 w-full" />
+            ))}
+          </div>
+          <Skeleton className="h-[400px] w-full" />
+        </div>
+      </AppLayout>
+    );
+  }
+
   return (
-    <AppLayout
-      title="Clientes"
-      subtitle="Gestão de clientes e contratos"
-    >
+    <AppLayout title="Clientes" subtitle="Gestão de clientes e contratos">
       {/* Actions Bar */}
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-1 items-center gap-3">
@@ -195,25 +99,25 @@ export default function Clients() {
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Total de Clientes</p>
           <p className="mt-1 font-mono text-2xl font-semibold text-foreground">
-            186
+            {clients?.length || 0}
           </p>
         </div>
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Clientes Ativos</p>
           <p className="mt-1 font-mono text-2xl font-semibold text-success">
-            172
+            {activeClients}
           </p>
         </div>
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Em Trial</p>
           <p className="mt-1 font-mono text-2xl font-semibold text-warning">
-            8
+            {trialClients}
           </p>
         </div>
         <div className="metric-card">
-          <p className="text-sm text-muted-foreground">Churned (30d)</p>
+          <p className="text-sm text-muted-foreground">Churned (Total)</p>
           <p className="mt-1 font-mono text-2xl font-semibold text-destructive">
-            6
+            {churnedClients}
           </p>
         </div>
       </div>
@@ -221,66 +125,53 @@ export default function Clients() {
       {/* Clients Table */}
       <div className="metric-card overflow-hidden p-0">
         <div className="overflow-x-auto">
-          <table className="data-table">
-            <thead className="bg-muted/50">
-              <tr>
-                <th>Cliente</th>
-                <th>CNPJ</th>
-                <th>Plano</th>
-                <th>MRR</th>
-                <th>ARR</th>
-                <th>Status</th>
-                <th>Início</th>
-                <th>Renovação</th>
-                <th>Health</th>
-                <th>Pagamento</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {clients.map((client) => {
-                const statusBadge = getStatusBadge(client.status);
-                return (
+          {clients && clients.length > 0 ? (
+            <table className="data-table">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th>Cliente</th>
+                  <th>CNPJ</th>
+                  <th>Plano</th>
+                  <th>MRR</th>
+                  <th>ARR</th>
+                  <th>Status</th>
+                  <th>Início</th>
+                  <th>Renovação</th>
+                  <th>Health</th>
+                  <th>Pagamento</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {clients.map((client) => (
                   <tr key={client.id}>
                     <td className="font-medium">{client.name}</td>
                     <td className="font-mono text-muted-foreground">
-                      {client.cnpj}
+                      {client.cnpj || "-"}
                     </td>
-                    <td>{client.plan}</td>
+                    <td>{client.plan?.name || "-"}</td>
                     <td className="font-mono">{formatCurrency(client.mrr)}</td>
                     <td className="font-mono">{formatCurrency(client.arr)}</td>
                     <td>
-                      <span className={statusBadge.class}>
-                        <span
-                          className={cn(
-                            "h-1.5 w-1.5 rounded-full",
-                            client.status === "active" && "bg-success",
-                            client.status === "trial" && "bg-warning",
-                            client.status === "churned" && "bg-destructive",
-                            client.status === "inactive" && "bg-muted-foreground"
-                          )}
-                        />
-                        {statusBadge.label}
-                      </span>
+                      <ClientStatusBadge status={client.status} />
                     </td>
                     <td className="font-mono text-muted-foreground">
-                      {formatDate(client.startDate)}
+                      {client.start_date ? formatDate(client.start_date) : "-"}
                     </td>
                     <td className="font-mono text-muted-foreground">
-                      {formatDate(client.renewalDate)}
+                      {client.renewal_date ? formatDate(client.renewal_date) : "-"}
                     </td>
                     <td>
                       <span
-                        className={cn(
-                          "font-mono font-medium",
-                          getHealthScoreColor(client.healthScore)
-                        )}
+                        className={`font-mono font-medium ${getHealthScoreColor(
+                          client.health_score
+                        )}`}
                       >
-                        {client.healthScore}%
+                        {client.health_score}%
                       </span>
                     </td>
                     <td className="text-muted-foreground">
-                      {client.paymentMethod}
+                      {client.payment_method || "-"}
                     </td>
                     <td>
                       <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -288,10 +179,23 @@ export default function Clients() {
                       </Button>
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <p className="text-lg font-medium text-muted-foreground">
+                Nenhum cliente encontrado
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Adicione um novo cliente para começar.
+              </p>
+              <Button className="mt-4" variant="outline">
+                <Plus className="mr-2 h-4 w-4" />
+                Novo Cliente
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </AppLayout>

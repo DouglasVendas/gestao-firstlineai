@@ -12,6 +12,7 @@ import {
   BarChart3,
   PieChart,
   FileText,
+  Import,
   Settings,
   ChevronDown,
   Activity,
@@ -63,6 +64,7 @@ const navigation: NavGroup[] = [
       { title: "Churn & Retenção", href: "/churn", icon: Activity },
       { title: "LTV & CAC", href: "/ltv-cac", icon: TrendingUp },
       { title: "Marketing & Funil", href: "/marketing", icon: Target },
+      { title: "Importação de Dados", href: "/import-data", icon: Import },
     ],
   },
   {

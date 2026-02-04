@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Users, DollarSign, TrendingUp, Target, ArrowRight } from "lucide-react";
+import { Users, DollarSign, TrendingUp, Target, ArrowRight, Loader2 } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -19,22 +19,11 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  FunnelChart,
-  Funnel,
-  LabelList,
   Cell,
 } from "recharts";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-
-const funnelData = [
-  { name: "Visitantes", value: 15000, fill: "hsl(var(--chart-1))" },
-  { name: "Leads", value: 2250, fill: "hsl(var(--chart-2))" },
-  { name: "MQL", value: 680, fill: "hsl(var(--chart-3))" },
-  { name: "SQL", value: 340, fill: "hsl(var(--chart-4))" },
-  { name: "Oportunidade", value: 170, fill: "hsl(var(--chart-5))" },
-  { name: "Cliente", value: 42, fill: "hsl(var(--success))" },
-];
+import { useMarketingStats } from "@/hooks/useMarketingStats";
 
 const channelPerformanceData = [
   { channel: "Google Ads", leads: 520, cpl: 45, conversao: 2.8, roi: 285 },
@@ -60,6 +49,34 @@ const pipelineData = [
 ];
 
 export default function Marketing() {
+  const { data: stats, isLoading } = useMarketingStats();
+
+  if (isLoading) {
+    return (
+      <AppLayout title="Marketing & Funil" subtitle="Performance de marketing e pipeline de vendas">
+        <div className="flex h-[400px] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // Use latest stats
+  const currentStats = stats?.[stats.length - 1];
+
+  const funnelData = currentStats ? [
+    { name: "Visitantes", value: currentStats.visitors, fill: "hsl(var(--chart-1))" },
+    { name: "Leads", value: currentStats.leads, fill: "hsl(var(--chart-2))" },
+    { name: "MQL", value: currentStats.mql, fill: "hsl(var(--chart-3))" },
+    { name: "SQL", value: currentStats.sql, fill: "hsl(var(--chart-4))" },
+    { name: "Oportunidades", value: currentStats.opportunities, fill: "hsl(var(--chart-5))" },
+    { name: "Clientes", value: currentStats.customers, fill: "hsl(var(--success))" },
+  ] : [];
+
+  // Use dynamic channel performance if available (casting JSON to any for now to avoid strict type checks on MVP)
+  const currentChannelPerformance = (currentStats?.channel_performance as any) || channelPerformanceData;
+  const currentCampaignROI = (currentStats?.campaign_roi as any) || campaignROIData;
+
   return (
     <AppLayout
       title="Marketing & Funil"
@@ -69,28 +86,28 @@ export default function Marketing() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Total de Leads"
-          value="2.250"
+          value={currentStats?.leads.toLocaleString() || "0"}
           change={{ value: 18, isPositive: true }}
           icon={Users}
           description="Este mês"
         />
         <MetricCard
           title="CPL Médio"
-          value="R$ 42"
+          value="R$ 42" // Hardcoded for simplified MVP or calculate from expenses/leads
           change={{ value: 12, isPositive: true }}
           icon={DollarSign}
           description="Custo por Lead"
         />
         <MetricCard
           title="Taxa de Conversão"
-          value="1.87%"
+          value={currentStats ? `${((currentStats.customers / currentStats.visitors) * 100).toFixed(2)}%` : "0%"}
           change={{ value: 0.3, isPositive: true }}
           icon={TrendingUp}
-          description="Lead → Cliente"
+          description="Visitante → Cliente"
         />
         <MetricCard
           title="ROI Marketing"
-          value="320%"
+          value="320%" // Requires expenses data to calculate accurately
           change={{ value: 25, isPositive: true }}
           icon={Target}
           description="Retorno sobre investimento"
@@ -107,8 +124,8 @@ export default function Marketing() {
             <div className="space-y-3">
               {funnelData.map((stage, idx) => {
                 const prevValue = idx > 0 ? funnelData[idx - 1].value : stage.value;
-                const conversionRate = ((stage.value / prevValue) * 100).toFixed(1);
-                const widthPercent = (stage.value / funnelData[0].value) * 100;
+                const conversionRate = prevValue ? ((stage.value / prevValue) * 100).toFixed(1) : "0";
+                const widthPercent = funnelData[0].value ? (stage.value / funnelData[0].value) * 100 : 0;
 
                 return (
                   <div key={stage.name} className="relative">
@@ -142,14 +159,16 @@ export default function Marketing() {
                 );
               })}
             </div>
-            <div className="mt-4 rounded-lg bg-muted/50 p-3 text-center">
-              <p className="text-sm text-muted-foreground">
-                Conversão Geral: Visitante → Cliente
-              </p>
-              <p className="text-2xl font-bold text-primary">
-                {((funnelData[funnelData.length - 1].value / funnelData[0].value) * 100).toFixed(2)}%
-              </p>
-            </div>
+            {funnelData.length > 0 && (
+              <div className="mt-4 rounded-lg bg-muted/50 p-3 text-center">
+                <p className="text-sm text-muted-foreground">
+                  Conversão Geral: Visitante → Cliente
+                </p>
+                <p className="text-2xl font-bold text-primary">
+                  {funnelData[0].value ? ((funnelData[funnelData.length - 1].value / funnelData[0].value) * 100).toFixed(2) : 0}%
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -208,7 +227,7 @@ export default function Marketing() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {channelPerformanceData.map((channel) => (
+                {currentChannelPerformance.map((channel: any) => (
                   <TableRow key={channel.channel}>
                     <TableCell className="font-medium">{channel.channel}</TableCell>
                     <TableCell className="text-right">{channel.leads}</TableCell>
@@ -239,7 +258,7 @@ export default function Marketing() {
           <CardContent>
             <div className="h-[250px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={campaignROIData} layout="vertical">
+                <BarChart data={currentCampaignROI} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                   <XAxis type="number" tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v}%`} />
                   <YAxis dataKey="campaign" type="category" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} width={120} />
@@ -252,7 +271,7 @@ export default function Marketing() {
                     formatter={(value: number) => [`${value}%`, 'ROI']}
                   />
                   <Bar dataKey="roi" radius={[0, 4, 4, 0]}>
-                    {campaignROIData.map((entry, index) => (
+                    {currentCampaignROI.map((entry: any, index: number) => (
                       <Cell
                         key={`cell-${index}`}
                         fill={entry.roi >= 300 ? 'hsl(var(--success))' : entry.roi >= 200 ? 'hsl(var(--primary))' : 'hsl(var(--warning))'}

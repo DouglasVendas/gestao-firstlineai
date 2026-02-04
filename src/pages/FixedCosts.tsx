@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { FixedCostsCategories } from "@/components/costs/FixedCostsCategories";
@@ -14,17 +15,11 @@ import {
   Legend,
 } from "recharts";
 import { Badge } from "@/components/ui/badge";
+import { useFixedCosts } from "@/hooks/useFixedCosts";
+import { formatCurrency } from "@/lib/formatters";
+import { Skeleton } from "@/components/ui/skeleton";
 
-const comparisonData = [
-  { month: "Jul", budgeted: 245000, actual: 242000 },
-  { month: "Ago", budgeted: 248000, actual: 251000 },
-  { month: "Set", budgeted: 250000, actual: 248500 },
-  { month: "Out", budgeted: 252000, actual: 254000 },
-  { month: "Nov", budgeted: 255000, actual: 253000 },
-  { month: "Dez", budgeted: 258000, actual: 260000 },
-  { month: "Jan", budgeted: 260000, actual: 257800 },
-];
-
+// Mock upcoming payments - typically would come from a payments/bills table
 const upcomingPayments = [
   { name: "Folha de Pagamento", amount: 110000, date: "05/01", status: "upcoming" },
   { name: "Aluguel", amount: 8500, date: "05/01", status: "upcoming" },
@@ -34,6 +29,81 @@ const upcomingPayments = [
 ];
 
 export default function FixedCosts() {
+  const { data: costs, isLoading } = useFixedCosts();
+
+  const {
+    totalActual,
+    personnelCost,
+    infrastructureCost,
+    operationalCost,
+    personnelPercent,
+    infraPercent,
+    operationalPercent,
+    comparisonData
+  } = useMemo(() => {
+    if (!costs) return {
+      totalActual: 0,
+      personnelCost: 0,
+      infrastructureCost: 0,
+      operationalCost: 0,
+      personnelPercent: 0,
+      infraPercent: 0,
+      operationalPercent: 0,
+      comparisonData: []
+    };
+
+    const tActual = costs.reduce((acc, c) => acc + c.actual, 0);
+
+    const pCost = costs.filter(c => c.category === 'Pessoal').reduce((acc, c) => acc + c.actual, 0);
+    const iCost = costs.filter(c => c.category === 'Infraestrutura').reduce((acc, c) => acc + c.actual, 0);
+    const oCost = costs.filter(c => c.category === 'Operacional').reduce((acc, c) => acc + c.actual, 0);
+
+    const pPercent = tActual ? (pCost / tActual) * 100 : 0;
+    const iPercent = tActual ? (iCost / tActual) * 100 : 0;
+    const oPercent = tActual ? (oCost / tActual) * 100 : 0;
+
+    // Use current month actuals mixed with mock history
+    const compData = [
+      { month: "Jul", budgeted: 245000, actual: 242000 },
+      { month: "Ago", budgeted: 248000, actual: 251000 },
+      { month: "Set", budgeted: 250000, actual: 248500 },
+      { month: "Out", budgeted: 252000, actual: 254000 },
+      { month: "Nov", budgeted: 255000, actual: 253000 },
+      { month: "Dez", budgeted: 258000, actual: 260000 },
+      { month: "Jan", budgeted: 260000, actual: tActual },
+    ];
+
+    return {
+      totalActual: tActual,
+      personnelCost: pCost,
+      infrastructureCost: iCost,
+      operationalCost: oCost,
+      personnelPercent: pPercent,
+      infraPercent: iPercent,
+      operationalPercent: oPercent,
+      comparisonData: compData
+    };
+  }, [costs]);
+
+  if (isLoading) {
+    return (
+      <AppLayout title="Custos Fixos" subtitle="Gestão de despesas recorrentes e provisionamentos">
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-32 w-full" />
+            ))}
+          </div>
+          <div className="grid gap-6 lg:grid-cols-3">
+            <Skeleton className="h-[300px] w-full lg:col-span-2" />
+            <Skeleton className="h-[300px] w-full" />
+          </div>
+          <Skeleton className="h-[300px] w-full" />
+        </div>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout
       title="Custos Fixos"
@@ -43,31 +113,31 @@ export default function FixedCosts() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Total Custos Fixos"
-          value="R$ 257.800"
+          value={formatCurrency(totalActual)}
           change={{ value: 1.2, isPositive: false }}
           icon={Building2}
           description="Este mês"
         />
         <MetricCard
           title="Pessoal"
-          value="R$ 168.800"
+          value={formatCurrency(personnelCost)}
           change={{ value: 0, isPositive: true }}
           icon={Users}
-          description="65.5% do total"
+          description={`${personnelPercent.toFixed(1)}% do total`}
         />
         <MetricCard
           title="Infraestrutura"
-          value="R$ 10.500"
+          value={formatCurrency(infrastructureCost)}
           change={{ value: 0, isPositive: true }}
           icon={Server}
-          description="4.1% do total"
+          description={`${infraPercent.toFixed(1)}% do total`}
         />
         <MetricCard
           title="Operacional"
-          value="R$ 78.500"
+          value={formatCurrency(operationalCost)}
           change={{ value: 2.1, isPositive: false }}
           icon={Briefcase}
-          description="30.4% do total"
+          description={`${operationalPercent.toFixed(1)}% do total`}
         />
       </div>
 

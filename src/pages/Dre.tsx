@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { FileText, Download, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { FileText, Download, TrendingUp, TrendingDown, Minus, Loader2 } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -17,6 +17,9 @@ import {
 } from "recharts";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { useDashboardData } from "@/hooks/useDashboardData";
+import { useFixedCosts } from "@/hooks/useFixedCosts";
+import { useVariableCosts } from "@/hooks/useVariableCosts";
 
 interface DRELine {
   label: string;
@@ -27,65 +30,104 @@ interface DRELine {
   indent?: number;
 }
 
-const dreData: DRELine[] = [
-  { label: "RECEITA BRUTA", actual: 358000, budgeted: 350000, isHeader: true },
-  { label: "MRR Total", actual: 345000, budgeted: 340000, indent: 1 },
-  { label: "Receitas Não Recorrentes", actual: 13000, budgeted: 10000, indent: 1 },
-  
-  { label: "(-) DEDUÇÕES", actual: -28640, budgeted: -28000, isHeader: true },
-  { label: "Impostos sobre Receita", actual: -25060, budgeted: -24500, indent: 1 },
-  { label: "Cancelamentos/Descontos", actual: -3580, budgeted: -3500, indent: 1 },
-  
-  { label: "= RECEITA LÍQUIDA", actual: 329360, budgeted: 322000, isTotal: true },
-  
-  { label: "(-) CUSTOS VARIÁVEIS", actual: -55200, budgeted: -52000, isHeader: true },
-  { label: "APIs de IA", actual: -23000, budgeted: -22000, indent: 1 },
-  { label: "Infraestrutura Cloud", actual: -20700, budgeted: -19000, indent: 1 },
-  { label: "Gateway de Pagamento", actual: -11500, budgeted: -11000, indent: 1 },
-  
-  { label: "= MARGEM DE CONTRIBUIÇÃO", actual: 274160, budgeted: 270000, isTotal: true },
-  
-  { label: "(-) CUSTOS FIXOS", actual: -257800, budgeted: -260000, isHeader: true },
-  { label: "Pessoal", actual: -168800, budgeted: -170000, indent: 1 },
-  { label: "Infraestrutura Fixa", actual: -10500, budgeted: -11000, indent: 1 },
-  { label: "Operacional", actual: -45500, budgeted: -46000, indent: 1 },
-  { label: "Marketing", actual: -33000, budgeted: -33000, indent: 1 },
-  
-  { label: "= EBITDA", actual: 16360, budgeted: 10000, isTotal: true },
-  
-  { label: "(-) Depreciação e Amortização", actual: -2500, budgeted: -2500, indent: 1 },
-  
-  { label: "= EBIT", actual: 13860, budgeted: 7500, isTotal: true },
-  
-  { label: "(-) Despesas Financeiras", actual: -1200, budgeted: -1500, indent: 1 },
-  { label: "(+) Receitas Financeiras", actual: 850, budgeted: 500, indent: 1 },
-  
-  { label: "= RESULTADO ANTES IR", actual: 13510, budgeted: 6500, isTotal: true },
-  
-  { label: "(-) IR/CSLL", actual: -3240, budgeted: -1560, indent: 1 },
-  
-  { label: "= LUCRO LÍQUIDO", actual: 10270, budgeted: 4940, isTotal: true },
-];
-
-const monthlyComparison = [
-  { month: "Jul", receita: 285000, custos: 248000, ebitda: 8500 },
-  { month: "Ago", receita: 295000, custos: 252000, ebitda: 12000 },
-  { month: "Set", receita: 305000, custos: 255000, ebitda: 15200 },
-  { month: "Out", receita: 320000, custos: 258000, ebitda: 18500 },
-  { month: "Nov", receita: 335000, custos: 260000, ebitda: 22000 },
-  { month: "Dez", receita: 348000, custos: 262000, ebitda: 28500 },
-  { month: "Jan", receita: 358000, custos: 257800, ebitda: 16360 },
-];
-
 export default function Dre() {
-  const receitaLiquida = dreData.find(d => d.label === "= RECEITA LÍQUIDA")?.actual || 0;
-  const margemContribuicao = dreData.find(d => d.label === "= MARGEM DE CONTRIBUIÇÃO")?.actual || 0;
-  const ebitda = dreData.find(d => d.label === "= EBITDA")?.actual || 0;
-  const lucroLiquido = dreData.find(d => d.label === "= LUCRO LÍQUIDO")?.actual || 0;
+  const { metrics, isLoading: isLoadingMetrics } = useDashboardData();
+  const { data: fixedCosts, isLoading: isLoadingFixed } = useFixedCosts();
+  const { data: variableCosts, isLoading: isLoadingVariable } = useVariableCosts();
 
-  const margemBruta = ((margemContribuicao / receitaLiquida) * 100).toFixed(1);
-  const margemEbitda = ((ebitda / receitaLiquida) * 100).toFixed(1);
-  const margemLiquida = ((lucroLiquido / receitaLiquida) * 100).toFixed(1);
+  if (isLoadingMetrics || isLoadingFixed || isLoadingVariable) {
+    return (
+      <AppLayout title="DRE" subtitle="Demonstrativo de Resultado do Exercício">
+        <div className="flex h-[400px] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // Get latest month data
+  const currentMetric = metrics?.[metrics.length - 1] || { revenue: 0, mrr: 0, expenses: 0 };
+
+  // Totals
+  const totalFixed = fixedCosts?.reduce((acc, c) => acc + c.actual, 0) || 0;
+  const totalVariable = variableCosts?.reduce((acc, c) => acc + c.amount, 0) || 0;
+
+  // Calculate DRE items
+  const receitaBruta = currentMetric.revenue || currentMetric.mrr; // Fallback to MRR if revenue empty
+  const impostos = receitaBruta * 0.08; // Est. Tax 8%
+  const receitaLiquida = receitaBruta - impostos;
+  const margemContribuicao = receitaLiquida - totalVariable;
+  const ebitda = margemContribuicao - totalFixed;
+  const depAmort = 2500; // Static estimate
+  const ebit = ebitda - depAmort;
+  const resFinanceiro = -350; // Static estimate
+  const lucroAntesIR = ebit + resFinanceiro;
+  const irCsll = lucroAntesIR > 0 ? lucroAntesIR * 0.15 : 0;
+  const lucroLiquido = lucroAntesIR - irCsll;
+
+  const dreData: DRELine[] = [
+    { label: "RECEITA BRUTA", actual: receitaBruta, budgeted: receitaBruta * 1.05, isHeader: true },
+    { label: "MRR Total", actual: currentMetric.mrr, budgeted: currentMetric.mrr * 1.02, indent: 1 },
+    { label: "Serviços/Extras", actual: receitaBruta - currentMetric.mrr, budgeted: 5000, indent: 1 },
+
+    { label: "(-) DEDUÇÕES", actual: -impostos, budgeted: -(receitaBruta * 1.05 * 0.08), isHeader: true },
+    { label: "Impostos sobre Receita", actual: -impostos, budgeted: -(receitaBruta * 1.05 * 0.08), indent: 1 },
+
+    { label: "= RECEITA LÍQUIDA", actual: receitaLiquida, budgeted: receitaLiquida * 1.05, isTotal: true },
+
+    { label: "(-) CUSTOS VARIÁVEIS", actual: -totalVariable, budgeted: -totalVariable * 0.95, isHeader: true },
+    // We could list variable categories here by mapping variableCosts
+    ...(variableCosts?.map(vc => ({
+      label: vc.category,
+      actual: -vc.amount,
+      budgeted: -vc.amount * 0.9,
+      indent: 1
+    })) || []),
+
+    { label: "= MARGEM DE CONTRIBUIÇÃO", actual: margemContribuicao, budgeted: margemContribuicao * 1.05, isTotal: true },
+
+    { label: "(-) CUSTOS FIXOS", actual: -totalFixed, budgeted: -totalFixed * 0.98, isHeader: true },
+    // We could list fixed categories here
+    ...(fixedCosts?.map(fc => ({
+      label: fc.category,
+      actual: -fc.actual,
+      budgeted: -fc.budgeted,
+      indent: 1
+    })) || []),
+
+    { label: "= EBITDA", actual: ebitda, budgeted: ebitda * 1.1, isTotal: true },
+
+    { label: "(-) Depreciação", actual: -depAmort, budgeted: -depAmort, indent: 1 },
+
+    { label: "= EBIT", actual: ebit, budgeted: ebit * 1.1, isTotal: true },
+
+    { label: "Resultado Financeiro", actual: resFinanceiro, budgeted: resFinanceiro, indent: 1 },
+
+    { label: "= RESULTADO ANTES IR", actual: lucroAntesIR, budgeted: lucroAntesIR * 1.1, isTotal: true },
+
+    { label: "(-) IR/CSLL", actual: -irCsll, budgeted: -irCsll * 1.1, indent: 1 },
+
+    { label: "= LUCRO LÍQUIDO", actual: lucroLiquido, budgeted: lucroLiquido * 1.1, isTotal: true },
+  ];
+
+  // Simplified chart data - reusing aggregates for mock history if needed or actual if available ??
+  // We can map metrics to monthlyComparison if metrics has historical data
+  const monthlyComparison = metrics?.slice(-6).map(m => {
+    // We need historical costs. Assuming fixed/variable costs are roughly relative to MRR or constant for MVP trend
+    // This is an approximation since we don't have historical cost tables
+    const r = m.revenue || m.mrr;
+    const estCosts = r * 0.7; // Mock cost history
+    return {
+      month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }),
+      receita: r,
+      custos: estCosts,
+      ebitda: r - estCosts
+    };
+  }) || [];
+
+  const margemBruta = receitaLiquida ? ((margemContribuicao / receitaLiquida) * 100).toFixed(1) : "0.0";
+  const margemEbitda = receitaLiquida ? ((ebitda / receitaLiquida) * 100).toFixed(1) : "0.0";
+  const margemLiquida = receitaLiquida ? ((lucroLiquido / receitaLiquida) * 100).toFixed(1) : "0.0";
 
   return (
     <AppLayout
