@@ -16,6 +16,9 @@ export interface Client {
         name: string;
     } | null;
     created_at: string;
+    churn_date: string | null;
+    churn_reason: string | null;
+    voluntary: boolean | null;
 }
 
 export const useClients = () => {

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,8 +20,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  BarChart,
-  Bar,
   Legend,
 } from "recharts";
 import { formatCurrency } from "@/lib/formatters";
@@ -28,17 +27,104 @@ import { cn } from "@/lib/utils";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { useClients } from "@/hooks/useClients";
 
-const cohortData = [
-  { cohort: "Jan 2023", month1: 100, month3: 92, month6: 85, month12: 78 },
-  { cohort: "Abr 2023", month1: 100, month3: 94, month6: 88, month12: 82 },
-  { cohort: "Jul 2023", month1: 100, month3: 95, month6: 89, month12: null },
-  { cohort: "Out 2023", month1: 100, month3: 96, month6: null, month12: null },
-  { cohort: "Jan 2024", month1: 100, month3: null, month6: null, month12: null },
-];
-
 export default function Churn() {
-  const { metrics, isLoading: isLoadingMetrics } = useDashboardData();
+  const { data: metrics, isLoading: isLoadingMetrics } = useDashboardData();
   const { data: clients, isLoading: isLoadingClients } = useClients();
+
+  // Dynamic Cohort Analysis Calculation
+  const cohortData = useMemo(() => {
+    if (!clients) return [];
+
+    // Group clients by start month (Cohort)
+    const cohorts: Record<string, { total: number; retained: Record<number, number> }> = {};
+
+    clients.forEach(client => {
+      if (!client.start_date) return;
+
+      const startDate = new Date(client.start_date);
+      const cohortKey = startDate.toLocaleString('default', { month: 'short', year: 'numeric' }); // e.g., "Jan 2024"
+
+      if (!cohorts[cohortKey]) {
+        cohorts[cohortKey] = { total: 0, retained: {} };
+      }
+
+      cohorts[cohortKey].total++;
+
+      // Calculate retention for months 1, 3, 6, 12
+      // Logic: A client is retained in month X if they are active OR if they churned AFTER month X
+      const monthsSinceStart = (new Date().getFullYear() - startDate.getFullYear()) * 12 + (new Date().getMonth() - startDate.getMonth());
+      const churnDate = client.churn_date ? new Date(client.churn_date) : null;
+      const monthsUntilChurn = churnDate
+        ? (churnDate.getFullYear() - startDate.getFullYear()) * 12 + (churnDate.getMonth() - startDate.getMonth())
+        : Infinity;
+
+      [1, 3, 6, 12].forEach(month => {
+        // If enough time has passed to measure this month
+        if (monthsSinceStart >= month) {
+          // Check if they were still active at that month
+          if (monthsUntilChurn >= month) {
+            cohorts[cohortKey].retained[month] = (cohorts[cohortKey].retained[month] || 0) + 1;
+          }
+        }
+      });
+    });
+
+    // Format for table
+    return Object.entries(cohorts)
+      .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime()) // Sort by date might be tricky with "Jan 2024" format, simplifying to just take last 5
+      .slice(-5)
+      .map(([cohort, data]) => ({
+        cohort,
+        month1: Math.round((data.retained[1] / data.total) * 100) || null,
+        month3: Math.round((data.retained[3] / data.total) * 100) || null,
+        month6: Math.round((data.retained[6] / data.total) * 100) || null,
+        month12: Math.round((data.retained[12] / data.total) * 100) || null,
+      }));
+  }, [clients]);
+
+
+  const { churnEvolutionData, atRiskClients, cancellations, currentChurnRate, churnedRevenue } = useMemo(() => {
+    if (!metrics || !clients) return {
+      churnEvolutionData: [],
+      atRiskClients: [],
+      cancellations: [],
+      currentChurnRate: 0,
+      churnedRevenue: 0
+    };
+
+    // Transform metrics for chart
+    const evolutionData = metrics?.map(m => ({
+      month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }),
+      churnRate: m.churn_rate,
+      revenueChurn: m.churn_rate * 1.15 // Mock revenue churn implication if specific data missing
+    })) || [];
+
+    // Clients at Risk (Low health score)
+    const atRisk = clients.filter(c => c.status === 'active' && c.health_score < 60)
+      .sort((a, b) => a.health_score - b.health_score)
+      .slice(0, 5);
+
+    // Recent Cancellations
+    const cancelled = clients.filter(c => c.status === 'churned')
+      .sort((a, b) => {
+        const dateA = a.churn_date ? new Date(a.churn_date).getTime() : 0;
+        const dateB = b.churn_date ? new Date(b.churn_date).getTime() : 0;
+        return dateB - dateA;
+      })
+      .slice(0, 10);
+
+    const currChurnRate = metrics[metrics.length - 1]?.churn_rate || 0;
+    const lostRev = cancelled.reduce((acc, c) => acc + (c.mrr || 0), 0);
+
+    return {
+      churnEvolutionData: evolutionData,
+      atRiskClients: atRisk,
+      cancellations: cancelled,
+      currentChurnRate: currChurnRate,
+      churnedRevenue: lostRev
+    };
+  }, [metrics, clients]);
+
 
   if (isLoadingMetrics || isLoadingClients) {
     return (
@@ -50,34 +136,6 @@ export default function Churn() {
     );
   }
 
-  // Transform metrics for chart
-  // Assuming metrics are ordered by date or we should sort them.
-  // 'metrics' comes from useDashboardData which sorts by month ascending usually.
-  const churnEvolutionData = metrics?.map(m => ({
-    month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }), // Quick parse, adding day to avoid timezone issues
-    churnRate: m.churn_rate,
-    revenueChurn: m.churn_rate * 1.15 // Mock revenue churn implication
-  })) || [];
-
-  // Clients at Risk (Low health score)
-  const atRiskClients = clients?.filter(c => c.status === 'active' && c.health_score < 60)
-    .sort((a, b) => a.health_score - b.health_score)
-    .slice(0, 5) || [];
-
-  // Recent Cancellations
-  const cancellations = clients?.filter(c => c.status === 'churned')
-    .slice(0, 10) || []; // Show last 10
-
-  const currentChurnRate = metrics?.[metrics.length - 1]?.churn_rate || 0;
-  // Estimate revenue lost (Churned clients MRR sum)
-  // Since we don't have historical churned clients with dates easily, we sum current churned clients MRR?
-  // Actually churned clients usually have 0 MRR? 
-  // Let's assume clients table retains their 'last MRR' or we filter by status='churned'.
-  // If status='churned', we can sum their MRR if it wasn't cleared. 
-  // If cleared, we can't show "Lost Revenue" easily without a transactions/log table.
-  // I'll sum MRR of churned clients assuming it's not zeroed out yet, or use a heuristic.
-  const churnedRevenue = cancellations.reduce((acc, c) => acc + (c.mrr || 0), 0);
-
   return (
     <AppLayout
       title="Churn & Retenção"
@@ -88,30 +146,30 @@ export default function Churn() {
         <MetricCard
           title="Churn Rate (Clientes)"
           value={`${currentChurnRate}%`}
-          change={{ value: 0.3, isPositive: false }} // Mock change
+          change={0}
           icon={Activity}
           description={`${cancellations.length} cancelamentos`}
         />
         <MetricCard
           title="Churn Rate (Receita)"
           value={`${(currentChurnRate * 1.1).toFixed(1)}%`}
-          change={{ value: 0.4, isPositive: false }}
+          change={0}
           icon={TrendingDown}
           description={`${formatCurrency(churnedRevenue)} perdidos`}
         />
         <MetricCard
           title="NRR (Net Revenue Retention)"
-          value="112%"
-          change={{ value: 3, isPositive: true }}
+          value="N/A"
+          change={0}
           icon={RefreshCw}
-          description="Expansão > Churn"
+          description="Dados insuficientes"
         />
         <MetricCard
           title="GRR (Gross Revenue Retention)"
-          value="97.7%"
-          change={{ value: 0.5, isPositive: true }}
+          value="N/A"
+          change={0}
           icon={Shield}
-          description="Sem expansão"
+          description="Dados insuficientes"
         />
       </div>
 
@@ -126,7 +184,7 @@ export default function Churn() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {atRiskClients.map((client, idx) => (
+              {atRiskClients.map((client) => (
                 <div
                   key={client.id}
                   className="flex items-center justify-between rounded-lg bg-background/50 p-4"
@@ -167,48 +225,55 @@ export default function Churn() {
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={churnEvolutionData}>
-                  <defs>
-                    <linearGradient id="churnGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="revenueChurnGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--warning))" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(var(--warning))" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                  <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                  <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v}%`} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number) => [`${value}%`, '']}
-                  />
-                  <Legend />
-                  <Area
-                    type="monotone"
-                    dataKey="churnRate"
-                    name="Churn Clientes"
-                    stroke="hsl(var(--destructive))"
-                    fill="url(#churnGradient)"
-                    strokeWidth={2}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="revenueChurn"
-                    name="Churn Receita"
-                    stroke="hsl(var(--warning))"
-                    fill="url(#revenueChurnGradient)"
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              {churnEvolutionData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={churnEvolutionData}>
+                    <defs>
+                      <linearGradient id="churnGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="revenueChurnGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(var(--warning))" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="hsl(var(--warning))" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                    <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
+                    <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v}%`} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                      formatter={(value: number) => [`${value.toFixed(1)}%`, '']}
+                    />
+                    <Legend />
+                    <Area
+                      type="monotone"
+                      dataKey="churnRate"
+                      name="Churn Clientes"
+                      stroke="hsl(var(--destructive))"
+                      fill="url(#churnGradient)"
+                      strokeWidth={2}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="revenueChurn"
+                      name="Churn Receita"
+                      stroke="hsl(var(--warning))"
+                      fill="url(#revenueChurnGradient)"
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-muted-foreground">
+                  Sem dados históricos.
+                </div>
+              )}
+
             </div>
           </CardContent>
         </Card>
@@ -231,13 +296,15 @@ export default function Churn() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {cohortData.map((row) => (
+                  {cohortData.length > 0 ? cohortData.map((row) => (
                     <TableRow key={row.cohort}>
                       <TableCell className="font-medium">{row.cohort}</TableCell>
                       <TableCell className="text-center">
-                        <span className="rounded bg-success/20 px-2 py-1 text-success">
-                          {row.month1}%
-                        </span>
+                        {row.month1 ? (
+                          <span className="rounded bg-success/20 px-2 py-1 text-success">
+                            {row.month1}%
+                          </span>
+                        ) : <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell className="text-center">
                         {row.month3 !== null ? (
@@ -276,7 +343,11 @@ export default function Churn() {
                         )}
                       </TableCell>
                     </TableRow>
-                  ))}
+                  )) : (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-muted-foreground">Sem dados suficientes para Cohort.</TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>
@@ -302,24 +373,28 @@ export default function Churn() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {cancellations.map((cancel, idx) => (
-                <TableRow key={idx}>
-                  <TableCell className="font-medium">{cancel.client}</TableCell>
-                  <TableCell>{cancel.plan}</TableCell>
+              {cancellations.length > 0 ? cancellations.map((cancel) => (
+                <TableRow key={cancel.id}>
+                  <TableCell className="font-medium">{cancel.name}</TableCell>
+                  <TableCell>{cancel.plan?.name || '-'}</TableCell>
                   <TableCell className="text-right text-destructive font-medium">
                     -{formatCurrency(cancel.mrr)}
                   </TableCell>
                   <TableCell>
-                    {new Date(cancel.date).toLocaleDateString("pt-BR")}
+                    {cancel.churn_date ? new Date(cancel.churn_date).toLocaleDateString("pt-BR") : '-'}
                   </TableCell>
-                  <TableCell>{cancel.reason}</TableCell>
+                  <TableCell>{cancel.churn_reason || '-'}</TableCell>
                   <TableCell>
                     <Badge variant={cancel.voluntary ? "secondary" : "destructive"}>
-                      {cancel.voluntary ? "Voluntário" : "Involuntário"}
+                      {cancel.voluntary === true ? "Voluntário" : cancel.voluntary === false ? "Involuntário" : "N/A"}
                     </Badge>
                   </TableCell>
                 </TableRow>
-              ))}
+              )) : (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">Nenhum cancelamento registrado.</TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </CardContent>

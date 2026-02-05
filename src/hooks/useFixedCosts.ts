@@ -9,6 +9,7 @@ export interface FixedCost {
     actual: number;
     due_day: number | null; // e.g., day of month
     created_at: string;
+    month: string | null;
 }
 
 export const useFixedCosts = () => {
