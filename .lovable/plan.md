@@ -1,238 +1,224 @@
 
 
-# Plano de Implementacao - Paginas Faltantes do Sistema SaaS
+# Plano de Auditoria e Correcao de Funcionalidades
 
-## Resumo Executivo
+## Resumo da Auditoria
 
-Este plano detalha a criacao de 14 novas funcionalidades/paginas para completar o sistema de gestao financeira SaaS B2B. A implementacao seguira os padroes ja estabelecidos no projeto, usando React, TypeScript, Tailwind CSS, Shadcn/UI e Recharts.
-
----
-
-## Fase 1: Paginas de Modulos Financeiros
-
-### 1.1 Recebimentos (`/receivables`)
-- Cards de metricas: Total Faturado, Total Recebido, Em Aberto, Inadimplencia
-- Tabela de faturas com status (Pago, Pendente, Atrasado, Cancelado)
-- Aging List visual (0-30, 31-60, 61-90, 90+ dias)
-- Grafico de adimplencia mensal
-- Acoes: Gerar fatura, Enviar cobranca, Registrar pagamento
-
-### 1.2 Custos Variaveis (`/variable-costs`)
-- Cards: Total Custos Variaveis, Margem Contribuicao, Custo por Cliente
-- Tabela de fornecedores/APIs (Anthropic, OpenAI, Cloud, Gateway)
-- Grafico de consumo por categoria
-- Drill-down: custo por cliente
-- Alertas de consumo anomalo
-
-### 1.3 Custos Fixos (`/fixed-costs`)
-- Cards: Total Custos Fixos, Pessoal, Infra, Operacional
-- Categorias expansiveis (Pessoal, Infraestrutura, Operacional, Servicos, Marketing, Impostos)
-- Calendario de vencimentos
-- Comparativo orcado vs realizado
-- Historico de provisionamento
+Apos analise detalhada de todas as 18 paginas e componentes do sistema, identifiquei **23 problemas** que precisam ser corrigidos para que o sistema funcione completamente.
 
 ---
 
-## Fase 2: Paginas de Analytics
+## Erros de Build Criticos (Bloqueiam o Sistema)
 
-### 2.1 Churn e Retencao (`/churn`)
-- Cards: Churn Rate (Clientes), Churn Rate (Receita), NRR, GRR
-- Grafico de evolucao do churn
-- Tabela de cancelamentos com motivos
-- Analise por cohort
-- Dashboard de clientes em risco com health score
+### 1. CreateClientModal.tsx - Propriedade Invalida
+**Arquivo:** `src/components/modals/CreateClientModal.tsx` (linha 76)
+**Problema:** O campo `plan` esta sendo passado no objeto de criacao, mas nao existe no tipo `Client` do banco
+**Impacto:** Erro TypeScript impede build
 
-### 2.2 LTV e CAC (`/ltv-cac`)
-- Cards: LTV, CAC, LTV:CAC Ratio, Payback Period
-- Grafico LTV vs CAC ao longo do tempo
-- Breakdown por plano e por canal de aquisicao
-- Componentes do CAC (Marketing, Vendas)
-- Simulador de cenarios ("E se...")
+### 2. Dre.tsx - Desestruturacao Incorreta
+**Arquivo:** `src/pages/Dre.tsx` (linha 34)
+**Problema:** Codigo usa `const { metrics, isLoading } = useDashboardData()` mas o hook retorna `{ data, isLoading }`
+**Impacto:** Erro TypeScript e crash na pagina DRE
 
-### 2.3 Marketing e Funil (`/marketing`)
-- Cards: Total Leads, CPL, Taxa Conversao, ROI
-- Funil visual com etapas (Visitante -> Lead -> MQL -> SQL -> Oportunidade -> Cliente)
-- Performance por canal (Google Ads, LinkedIn, Organico, Indicacao)
-- Grafico de ROI por campanha
-- Pipeline de vendas com valor potencial
+### 3. Valuation.tsx - Desestruturacao Incorreta
+**Arquivo:** `src/pages/Valuation.tsx` (linha 44)
+**Problema:** Mesmo erro - usa `metrics` ao inves de `data`
+**Impacto:** Erro TypeScript e crash na pagina Valuation
 
----
-
-## Fase 3: Paginas Financeiras Avancadas
-
-### 3.1 DRE (`/dre`)
-- Estrutura completa do DRE:
-  - Receita Bruta
-  - Deducoes
-  - Receita Liquida
-  - Custos Variaveis
-  - Margem de Contribuicao
-  - Custos Fixos
-  - EBITDA
-  - Resultado Liquido
-- Toggle: Mensal / Trimestral / Anual
-- Comparativo: Realizado vs Orcado
-- Analise vertical e horizontal
-- Export PDF/Excel
-
-### 3.2 Fluxo de Caixa (`/cashflow`)
-- Cards: Saldo Atual, Entradas (30d), Saidas (30d), Runway
-- Grafico de evolucao do saldo
-- Tabela de movimentacoes (Entradas/Saidas)
-- Projecao futura (3, 6, 12 meses)
-- Indicador de Burn Rate
-
-### 3.3 Valuation (`/valuation`)
-- Calculadora interativa com multiplos metodos:
-  - Multiplos de Receita (ARR x Multiplo)
-  - DCF (Fluxo de Caixa Descontado)
-  - Scorecard
-- Inputs editaveis (Taxa crescimento, Margem, Multiplo, WACC)
-- Analise de sensibilidade com matriz
-- Cenarios: Conservador, Base, Otimista
-- Grafico waterfall de fatores de valuation
+### 4. Budget.tsx - Import Duplicado
+**Arquivo:** `src/pages/Budget.tsx` (linha 191)
+**Problema:** Import de `Wallet` esta duplicado no final do arquivo
+**Impacto:** Erro de sintaxe
 
 ---
 
-## Fase 4: Planejamento e Configuracoes
+## Problemas de Funcionalidade (Botoes/Acoes que nao funcionam)
 
-### 4.1 Orcamento (`/budget`)
-- Cards: Orcamento Anual, Realizado, Variacao, Forecast
-- Tabela de metas mensais por categoria
-- Grafico comparativo orcado vs realizado
-- Planejamento de cenarios
-- OKRs e tracking de metas
+### 5. Hook useFixedCosts - due_day inexistente
+**Arquivo:** `src/hooks/useFixedCosts.ts`
+**Problema:** Interface define `due_day` mas a tabela no banco nao possui essa coluna
+**Impacto:** Modal de criar custo fixo pode falhar
 
-### 4.2 Relatorios (`/reports`)
-- Lista de relatorios disponiveis
-- Construtor de relatorios simplificado
-- Templates pre-definidos (Executivo, Financeiro, Vendas, Marketing)
-- Agendamento de envio
-- Historico de relatorios gerados
+### 6. Hook useCreateClient - Interface desalinhada
+**Arquivo:** `src/hooks/useClients.ts`
+**Problema:** Interface `Client` possui campos que nao existem na tabela (arr, health_score, payment_method, renewal_date)
+**Impacto:** Criacao de clientes pode falhar
 
-### 4.3 Configuracoes (`/settings`)
-- Abas: Geral, Empresa, Usuarios, Integrações, Notificacoes
-- Configuracoes de empresa (nome, CNPJ, logo)
-- Gestao de usuarios e permissoes
-- Integrações (Gateways, Cloud, Contabilidade)
-- Preferencias de notificacao
-- Planos e billing
+### 7. Hook useCreateInvoice - Campo paid_at inexistente
+**Arquivo:** `src/hooks/useInvoices.ts`
+**Problema:** Modal envia `paid_at` mas tabela usa `paid_date`
+**Impacto:** Criacao de faturas com erro de campo
 
----
+### 8. Invoice Interface - Campo description inexistente
+**Arquivo:** `src/hooks/useInvoices.ts`
+**Problema:** Interface define `description` mas tabela `invoices` nao possui essa coluna
+**Impacto:** Criacao de faturas falha
 
-## Fase 5: Componentes de UI/UX
+### 9. Cashflow - Botao "Nova Transacao" nao funcional
+**Arquivo:** `src/pages/Cashflow.tsx` (linha 77-80)
+**Problema:** Botao nao abre modal, apenas renderiza sem acao
+**Impacto:** Impossivel criar transacoes pelo UI
 
-### 5.1 Icone de Notificacoes
-- Dropdown com lista de notificacoes
-- Tipos: Alerta, Info, Sucesso
-- Badge com contador de nao lidas
-- Acoes: Marcar como lida, Ver todas
+### 10. Budget - Botao "Novo Orcamento" nao funcional
+**Arquivo:** `src/pages/Budget.tsx` (linha 93-95)
+**Problema:** Botao sem modal ou acao implementada
+**Impacto:** Impossivel criar orcamentos
 
-### 5.2 Perfil do Usuario
-- Dropdown com:
-  - Foto e nome do usuario
-  - Link para perfil
-  - Link para configuracoes
-  - Trocar conta/workspace
-  - Logout
-- Avatar com iniciais/foto
+### 11. Reports - Botoes sem funcionalidade
+**Arquivo:** `src/pages/Reports.tsx` (linhas 21-23)
+**Problema:** Botoes "Novo Relatorio" e "Agendar" sem implementacao
+**Impacto:** Funcionalidades de relatorio nao operacionais
 
----
+### 12. Settings - Botoes sem funcionalidade
+**Arquivo:** `src/pages/Settings.tsx`
+**Problema:** 
+  - "Salvar Alteracoes" (linha 45) sem handler
+  - "Convidar Usuario" (linha 54) sem modal
+  - "Fazer Upgrade" (linha 111) sem acao
+**Impacto:** Configuracoes nao salvam
 
-## Estrutura de Arquivos a Criar
+### 13. InvoicesTable - Acoes do Dropdown sem implementacao
+**Arquivo:** `src/components/receivables/InvoicesTable.tsx` (linhas 79-90)
+**Problema:** "Ver detalhes", "Enviar cobranca", "Registrar pagamento" sem handlers
+**Impacto:** Acoes de fatura nao funcionam
 
-```text
-src/pages/
-  - Receivables.tsx
-  - VariableCosts.tsx
-  - FixedCosts.tsx
-  - Churn.tsx
-  - LtvCac.tsx
-  - Marketing.tsx
-  - Dre.tsx
-  - Cashflow.tsx
-  - Valuation.tsx
-  - Budget.tsx
-  - Reports.tsx
-  - Settings.tsx
+### 14. Receivables - Botao "Enviar Cobrancas em Lote" sem acao
+**Arquivo:** `src/pages/Receivables.tsx` (linhas 65-68)
+**Problema:** Botao renderiza mas nao tem funcionalidade
+**Impacto:** Feature critica de cobranca inoperante
 
-src/components/
-  - header/
-    - NotificationsDropdown.tsx
-    - UserDropdown.tsx
-  - receivables/
-    - AgingList.tsx
-    - InvoicesTable.tsx
-  - costs/
-    - CostCategoryCard.tsx
-    - CostBreakdownChart.tsx
-  - churn/
-    - ChurnAnalysisChart.tsx
-    - CohortTable.tsx
-    - AtRiskClients.tsx
-  - ltv-cac/
-    - LTVBreakdown.tsx
-    - CACBreakdown.tsx
-    - Simulator.tsx
-  - marketing/
-    - FunnelChart.tsx
-    - ChannelPerformance.tsx
-  - dre/
-    - DRETable.tsx
-    - DREChart.tsx
-  - cashflow/
-    - CashflowProjection.tsx
-    - TransactionsTable.tsx
-  - valuation/
-    - ValuationCalculator.tsx
-    - SensitivityMatrix.tsx
-    - ScenarioComparison.tsx
-  - budget/
-    - BudgetTable.tsx
-    - OKRTracker.tsx
-```
+### 15. Plans - Botao "Editar" plano sem funcionalidade
+**Arquivo:** `src/pages/Plans.tsx` (linhas 172-175)
+**Problema:** Botao de editar nao abre modal de edicao
+**Impacto:** Impossivel editar planos existentes
+
+### 16. Clients - Botao MoreHorizontal sem menu
+**Arquivo:** `src/pages/Clients.tsx` (linha 220)
+**Problema:** Botao de acoes do cliente nao abre dropdown
+**Impacto:** Impossivel editar/excluir clientes
 
 ---
 
-## Atualizacoes Necessarias
+## Problemas de RLS (Dados nao salvam/carregam)
 
-### App.tsx - Novas Rotas
-Adicionar rotas para todas as 12 novas paginas no roteador
+### 17. Tabela plans - Sem INSERT/UPDATE/DELETE
+**Problema:** RLS bloqueia escrita na tabela de planos
+**Impacto:** Modal "Novo Plano" vai falhar ao salvar
 
-### AppLayout.tsx - Header
-Integrar NotificationsDropdown e UserDropdown no header
+### 18. Tabela marketing_stats - Sem INSERT/UPDATE/DELETE
+**Problema:** RLS bloqueia escrita
+**Impacto:** Impossivel adicionar dados de marketing
+
+### 19. Tabela budget - Sem INSERT/UPDATE/DELETE
+**Problema:** RLS bloqueia escrita
+**Impacto:** Impossivel criar orcamentos mesmo com modal
+
+### 20. Tabela transactions - Sem INSERT/UPDATE/DELETE
+**Problema:** RLS bloqueia escrita
+**Impacto:** Impossivel criar transacoes mesmo com modal
+
+---
+
+## Problemas de UI/UX
+
+### 21. DRE/Valuation - Tabs nao funcionais
+**Arquivo:** `src/pages/Dre.tsx` (linhas 140-144)
+**Problema:** Tabs Mensal/Trimestral/Anual nao alteram dados exibidos
+**Impacto:** Funcionalidade de periodo inoperante
+
+### 22. Marketing - Dados mockados estaticos
+**Arquivo:** `src/pages/Marketing.tsx` (linhas 28-49)
+**Problema:** Dados de canal e campanha sao estaticos, nao vem do banco
+**Impacto:** Dados nao refletem realidade
+
+### 23. Clients Table - Colunas faltando no banco
+**Arquivo:** `src/pages/Clients.tsx`
+**Problema:** Exibe `health_score`, `payment_method`, `renewal_date`, `arr` que nao existem na tabela
+**Impacto:** Colunas vazias ou erros
+
+---
+
+## Plano de Correcao
+
+### Fase 1: Corrigir Erros de Build (Prioritario)
+1. Remover `plan: null` do CreateClientModal
+2. Alterar `metrics` para `data` em Dre.tsx e Valuation.tsx
+3. Remover import duplicado em Budget.tsx
+
+### Fase 2: Alinhar Interfaces com Banco de Dados
+1. Atualizar interface `Client` removendo campos inexistentes
+2. Atualizar interface `FixedCost` removendo `due_day`
+3. Atualizar interface `Invoice` - `paid_at` para `paid_date`, remover `description`
+
+### Fase 3: Corrigir RLS Policies
+Adicionar policies de INSERT/UPDATE/DELETE para:
+- `plans`
+- `marketing_stats`
+- `budget`
+- `transactions`
+
+### Fase 4: Implementar Funcionalidades Faltantes
+1. Criar `CreateTransactionModal` para Cashflow
+2. Criar `CreateBudgetModal` para Budget
+3. Adicionar handlers aos DropdownMenuItems em InvoicesTable
+4. Implementar logica dos botoes em Settings
+5. Criar modal de edicao de planos
+6. Adicionar Dropdown ao botao de acoes em Clients
+
+### Fase 5: Melhorias de Dados
+1. Remover colunas inexistentes da tabela de clientes
+2. Adicionar colunas faltantes ao banco OU remover da interface
 
 ---
 
 ## Detalhes Tecnicos
 
-### Padroes a Seguir
-- Usar `AppLayout` como wrapper de todas as paginas
-- Usar `MetricCard` para cards de metricas
-- Usar Recharts para todos os graficos (AreaChart, BarChart, LineChart, PieChart, ComposedChart)
-- Usar classe `.metric-card` para containers
-- Usar classe `.data-table` para tabelas
-- Manter paleta de cores: primary (cyan), success (green), warning (orange), destructive (red)
+### Arquivos a Modificar
 
-### Dados
-- Todos os dados serao mockados inicialmente
-- Estrutura preparada para integracao futura com backend/Supabase
+```text
+src/components/modals/CreateClientModal.tsx
+src/pages/Dre.tsx
+src/pages/Valuation.tsx
+src/pages/Budget.tsx
+src/hooks/useClients.ts
+src/hooks/useFixedCosts.ts
+src/hooks/useInvoices.ts
+src/pages/Clients.tsx
+src/pages/Cashflow.tsx
+src/pages/Settings.tsx
+src/pages/Reports.tsx
+src/pages/Plans.tsx
+src/components/receivables/InvoicesTable.tsx
+```
 
-### Componentes Reutilizaveis
-- Formatadores de moeda (`formatCurrency`)
-- Formatadores de data (`formatDate`)
-- Badges de status
-- Tooltips customizados para graficos
+### Novos Componentes a Criar
+
+```text
+src/components/modals/CreateTransactionModal.tsx
+src/components/modals/CreateBudgetModal.tsx
+src/components/modals/EditPlanModal.tsx
+src/components/modals/EditClientModal.tsx
+```
+
+### Migracao de Banco Necessaria
+
+```sql
+-- Adicionar policies de escrita
+CREATE POLICY "Allow public write" ON public.plans FOR ALL USING (true);
+CREATE POLICY "Allow public write" ON public.marketing_stats FOR ALL USING (true);
+CREATE POLICY "Allow public write" ON public.budget FOR ALL USING (true);
+CREATE POLICY "Allow public write" ON public.transactions FOR ALL USING (true);
+```
 
 ---
 
-## Ordem de Implementacao Sugerida
+## Ordem de Execucao Recomendada
 
-1. **Batch 1 - UI Components**: NotificationsDropdown, UserDropdown
-2. **Batch 2 - Financeiro Basico**: Receivables, VariableCosts, FixedCosts
-3. **Batch 3 - Analytics**: Churn, LtvCac, Marketing
-4. **Batch 4 - Financeiro Avancado**: DRE, Cashflow, Valuation
-5. **Batch 5 - Planejamento**: Budget, Reports, Settings
+1. **Corrigir erros de build** - Sistema nao funciona sem isso
+2. **Corrigir RLS policies** - Dados nao salvam sem isso
+3. **Alinhar interfaces** - Evita erros futuros
+4. **Implementar modais faltantes** - Completa funcionalidades CRUD
+5. **Adicionar handlers aos botoes** - Torna o sistema utilizavel
+6. **Remover/ajustar colunas da UI** - Polish final
 
-Cada batch pode ser implementado em sequencia, com testes de navegacao e verificacao visual apos cada um.
-
+Esta auditoria cobre todos os problemas identificados. Ao aprovar, implementarei as correcoes na ordem especificada para garantir que o sistema funcione de ponta a ponta.
