@@ -19,6 +19,7 @@ import {
 import { useTransactions } from "@/hooks/useTransactions";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { cn } from "@/lib/utils";
+import { CreateTransactionModal } from "@/components/modals/CreateTransactionModal";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -74,10 +75,7 @@ export default function Cashflow() {
             Exportar
           </Button>
         </div>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Nova Transação
-        </Button>
+        <CreateTransactionModal />
       </div>
 
       {/* Metric Cards */}

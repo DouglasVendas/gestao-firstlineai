@@ -16,6 +16,7 @@ import {
 } from "recharts";
 import { useFixedCosts } from "@/hooks/useFixedCosts";
 import { useDashboardData } from "@/hooks/useDashboardData";
+import { CreateBudgetModal } from "@/components/modals/CreateBudgetModal";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -89,10 +90,7 @@ export default function Budget() {
             Exportar Relatório
           </Button>
         </div>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Novo Orçamento
-        </Button>
+        <CreateBudgetModal />
       </div>
 
       {/* Metric Cards */}
