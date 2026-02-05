@@ -16,13 +16,6 @@ import { CreateClientModal } from "@/components/modals/CreateClientModal";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const getHealthScoreColor = (score: number) => {
-  if (score >= 80) return "text-success";
-  if (score >= 50) return "text-warning";
-  return "text-destructive";
-};
-
-
 export default function Clients() {
   const { data: clients, isLoading } = useClients();
   const [searchTerm, setSearchTerm] = useState("");
@@ -52,14 +45,13 @@ export default function Clients() {
 
   const handleExport = () => {
     if (!clients) return;
-    const header = ["Nome", "CNPJ", "Status", "MRR", "ARR", "Inicio"];
+    const header = ["Nome", "Email", "Status", "MRR", "Inicio"];
     const rows = clients.map((c) => [
       c.name,
-      c.cnpj,
+      c.email || '',
       c.status,
       c.mrr,
-      c.arr,
-      c.start_date,
+      c.start_date || '',
     ]);
     const csvContent =
       "data:text/csv;charset=utf-8," +
@@ -169,15 +161,11 @@ export default function Clients() {
               <thead className="bg-muted/50">
                 <tr>
                   <th>Cliente</th>
-                  <th>CNPJ</th>
+                  <th>Email</th>
                   <th>Plano</th>
                   <th>MRR</th>
-                  <th>ARR</th>
                   <th>Status</th>
                   <th>Início</th>
-                  <th>Renovação</th>
-                  <th>Health</th>
-                  <th>Pagamento</th>
                   <th></th>
                 </tr>
               </thead>
@@ -185,12 +173,11 @@ export default function Clients() {
                 {filteredClients.map((client) => (
                   <tr key={client.id}>
                     <td className="font-medium">{client.name}</td>
-                    <td className="font-mono text-muted-foreground">
-                      {client.cnpj || "-"}
+                    <td className="text-muted-foreground">
+                      {client.email || "-"}
                     </td>
                     <td>{client.plan?.name || "-"}</td>
                     <td className="font-mono">{formatCurrency(client.mrr)}</td>
-                    <td className="font-mono">{formatCurrency(client.arr)}</td>
                     <td>
                       <ClientStatusBadge status={client.status} />
                     </td>
@@ -198,23 +185,6 @@ export default function Clients() {
                       {client.start_date
                         ? formatDate(client.start_date)
                         : "-"}
-                    </td>
-                    <td className="font-mono text-muted-foreground">
-                      {client.renewal_date
-                        ? formatDate(client.renewal_date)
-                        : "-"}
-                    </td>
-                    <td>
-                      <span
-                        className={`font-mono font-medium ${getHealthScoreColor(
-                          client.health_score
-                        )}`}
-                      >
-                        {client.health_score}%
-                      </span>
-                    </td>
-                    <td className="text-muted-foreground">
-                      {client.payment_method || "-"}
                     </td>
                     <td>
                       <Button variant="ghost" size="icon" className="h-8 w-8">

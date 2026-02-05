@@ -5,9 +5,8 @@ export interface FixedCost {
     id: string;
     category: string;
     description: string | null;
-    budgeted: number;
+    budgeted: number | null;
     actual: number;
-    due_day: number | null; // e.g., day of month
     created_at: string;
     month: string | null;
 }

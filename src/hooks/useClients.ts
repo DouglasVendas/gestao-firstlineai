@@ -4,14 +4,11 @@ import { supabase } from "@/integrations/supabase/client";
 export interface Client {
     id: string;
     name: string;
-    cnpj: string | null;
+    email: string | null;
     status: string;
     mrr: number;
-    arr: number;
     start_date: string | null;
-    renewal_date: string | null;
-    health_score: number;
-    payment_method: string | null;
+    plan_id: string | null;
     plan: {
         name: string;
     } | null;

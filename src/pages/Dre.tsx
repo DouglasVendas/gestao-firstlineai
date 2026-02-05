@@ -31,7 +31,7 @@ interface DRELine {
 }
 
 export default function Dre() {
-  const { metrics, isLoading: isLoadingMetrics } = useDashboardData();
+  const { data: metrics, isLoading: isLoadingMetrics } = useDashboardData();
   const { data: fixedCosts, isLoading: isLoadingFixed } = useFixedCosts();
   const { data: variableCosts, isLoading: isLoadingVariable } = useVariableCosts();
 

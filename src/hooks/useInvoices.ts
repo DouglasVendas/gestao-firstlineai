@@ -6,10 +6,9 @@ export interface Invoice {
     id: string;
     client_id: string | null;
     value: number;
-    due_date: string; // ISO date string
+    due_date: string;
     status: 'paid' | 'pending' | 'overdue' | 'canceled';
-    paid_at: string | null;
-    description: string | null;
+    paid_date: string | null;
     created_at: string;
     client?: {
         name: string;

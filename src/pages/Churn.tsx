@@ -99,10 +99,8 @@ export default function Churn() {
       revenueChurn: m.churn_rate * 1.15 // Mock revenue churn implication if specific data missing
     })) || [];
 
-    // Clients at Risk (Low health score)
-    const atRisk = clients.filter(c => c.status === 'active' && c.health_score < 60)
-      .sort((a, b) => a.health_score - b.health_score)
-      .slice(0, 5);
+    // Clients at Risk - since we don't have health_score, skip or show none
+    const atRisk: typeof clients = [];
 
     // Recent Cancellations
     const cancelled = clients.filter(c => c.status === 'churned')
@@ -190,13 +188,8 @@ export default function Churn() {
                   className="flex items-center justify-between rounded-lg bg-background/50 p-4"
                 >
                   <div className="flex items-center gap-4">
-                    <div
-                      className={cn(
-                        "flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold",
-                        client.health_score < 40 ? "bg-destructive/20 text-destructive" : "bg-warning/20 text-warning"
-                      )}
-                    >
-                      {client.health_score}
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-warning/20 text-warning text-sm font-bold">
+                      !
                     </div>
                     <div>
                       <p className="font-medium">{client.name}</p>
@@ -207,7 +200,7 @@ export default function Churn() {
                   </div>
                   <div className="flex gap-2">
                     <Badge variant="outline" className="text-warning border-warning/30">
-                      Health Score Baixo
+                      Em Risco
                     </Badge>
                   </div>
                 </div>

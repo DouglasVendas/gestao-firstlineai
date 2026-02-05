@@ -35,13 +35,10 @@ import { Loader2, Plus } from "lucide-react";
 // Schema validation
 const formSchema = z.object({
     name: z.string().min(2, "Nome deve ter pelo menos 2 caracteres."),
-    cnpj: z.string().optional(),
+    email: z.string().email("Email inválido").optional().or(z.literal("")),
     status: z.enum(["active", "trial", "churned", "inactive"]),
     mrr: z.coerce.number().min(0, "MRR deve ser positivo."),
-    arr: z.coerce.number().optional(),
-    start_date: z.string().optional(), // Date input returns string YYYY-MM-DD
-    payment_method: z.string().optional(),
-    health_score: z.coerce.number().min(0).max(100).optional(),
+    start_date: z.string().optional(),
 });
 
 export function CreateClientModal() {
@@ -53,27 +50,25 @@ export function CreateClientModal() {
         resolver: zodResolver(formSchema),
         defaultValues: {
             name: "",
-            cnpj: "",
+            email: "",
             status: "active",
             mrr: 0,
-            arr: 0,
             start_date: new Date().toISOString().split("T")[0],
-            payment_method: "Boleto",
-            health_score: 100,
         },
     });
 
     const onSubmit = (values: z.infer<typeof formSchema>) => {
-        // Calculate ARR automatically if not provided or valid
-        const arr = values.arr && values.arr > 0 ? values.arr : values.mrr * 12;
-
         createClient.mutate(
             {
-                ...values,
-                arr,
-                plan_id: undefined, // Plan selection can be added later if needed hooks exist
-                renewal_date: null,
-                plan: null,
+                name: values.name,
+                email: values.email || null,
+                status: values.status,
+                mrr: values.mrr,
+                start_date: values.start_date || null,
+                plan_id: undefined,
+                churn_date: null,
+                churn_reason: null,
+                voluntary: null,
             },
             {
                 onSuccess: () => {
@@ -185,19 +180,19 @@ export function CreateClientModal() {
                                 )}
                             />
 
-                            <FormField
-                                control={form.control}
-                                name="cnpj"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>CNPJ</FormLabel>
-                                        <FormControl>
-                                            <Input placeholder="00.000.000/0000-00" {...field} />
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
+                        <FormField
+                            control={form.control}
+                            name="email"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Email</FormLabel>
+                                    <FormControl>
+                                        <Input type="email" placeholder="email@empresa.com" {...field} />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
                         </div>
 
                         <DialogFooter>
