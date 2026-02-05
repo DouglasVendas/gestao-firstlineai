@@ -3,7 +3,7 @@ import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Download, Plus, Target, TrendingUp, AlertCircle, Loader2 } from "lucide-react";
+import { Download, Plus, Target, TrendingUp, AlertCircle, Loader2, Wallet } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -188,4 +188,4 @@ export default function Budget() {
     </AppLayout>
   );
 }
-import { Wallet } from "lucide-react";
+

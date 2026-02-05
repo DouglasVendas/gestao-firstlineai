@@ -41,7 +41,7 @@ const waterfallData = [
 ];
 
 export default function Valuation() {
-  const { metrics, isLoading } = useDashboardData();
+  const { data: metrics, isLoading } = useDashboardData();
   const [inputs, setInputs] = useState({
     arr: 4200000,
     growthRate: 85,

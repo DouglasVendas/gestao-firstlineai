@@ -25,11 +25,6 @@ const getStatusBadge = (status: string) => {
   return config[status] || config["inactive"];
 };
 
-const getHealthScoreColor = (score: number) => {
-  if (score >= 80) return "text-success";
-  if (score >= 50) return "text-warning";
-  return "text-destructive";
-};
 
 export function ClientsTable() {
   const { data: recentClients, isLoading } = useRecentClients();
@@ -69,7 +64,6 @@ export function ClientsTable() {
               <th>MRR</th>
               <th>Status</th>
               <th>Início</th>
-              <th>Health Score</th>
               <th></th>
             </tr>
           </thead>
@@ -97,16 +91,6 @@ export function ClientsTable() {
                   </td>
                   <td className="font-mono text-muted-foreground">
                     {formatDate(client.start_date)}
-                  </td>
-                  <td>
-                    <span
-                      className={cn(
-                        "font-mono font-medium",
-                        getHealthScoreColor(client.health_score)
-                      )}
-                    >
-                      {client.health_score}
-                    </span>
                   </td>
                   <td>
                     <Button variant="ghost" size="icon" className="h-8 w-8">
