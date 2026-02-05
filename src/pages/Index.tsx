@@ -15,8 +15,9 @@ import {
   Calendar,
   Loader2,
 } from "lucide-react";
-import { useDashboardData } from "@/hooks/useDashboardData";
-import { useClientsCount } from "@/hooks/useClients";
+// import { useDashboardData } from "@/hooks/useDashboardData"; // Deprecated
+// import { useClientsCount } from "@/hooks/useClients"; // Deprecated
+import { useFinancials } from "@/hooks/useFinancials";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -28,10 +29,9 @@ const formatCurrency = (value: number) => {
 };
 
 export default function Index() {
-  const { data: metrics, isLoading: isLoadingMetrics } = useDashboardData();
-  const { data: activeClients, isLoading: isLoadingClients } = useClientsCount();
+  const { data: financials, isLoading } = useFinancials();
 
-  if (isLoadingMetrics || isLoadingClients) {
+  if (isLoading) {
     return (
       <AppLayout title="Dashboard Executivo" subtitle="Visão geral das métricas financeiras e operacionais">
         <div className="flex h-[400px] items-center justify-center">
@@ -41,15 +41,25 @@ export default function Index() {
     );
   }
 
-  const currentMonth = metrics?.[metrics.length - 1] || { mrr: 0, arr: 0, churn_rate: 0 };
-  const previousMonth = metrics?.[metrics.length - 2] || { mrr: 0, arr: 0, churn_rate: 0 };
+  // Get the last complete month (or current running month)
+  const currentMonth = financials?.[financials.length - 1] || {
+    mrr: 0, arr: 0, churn_rate: 0, revenue: 0, active_clients: 0
+  };
+  const previousMonth = financials?.[financials.length - 2] || {
+    mrr: 0, arr: 0, churn_rate: 0, revenue: 0, active_clients: 0
+  };
 
   const mrrChange = previousMonth.mrr ? ((currentMonth.mrr - previousMonth.mrr) / previousMonth.mrr) * 100 : 0;
   const arrChange = previousMonth.arr ? ((currentMonth.arr - previousMonth.arr) / previousMonth.arr) * 100 : 0;
 
+  // Calculate client growth
+  const clientsChange = previousMonth.active_clients ?
+    ((currentMonth.active_clients - previousMonth.active_clients) / previousMonth.active_clients) * 100 : 0;
+
   const churnRate = currentMonth.churn_rate || 0;
 
-  // Mock LTV/CAC calculation or fetch if available
+  // Mock LTV/CAC calculation or can be derived if we add CAC logic to useFinancials
+  // For now, keep mock or simpler derivation if possible
   const ltvCac = 5.3;
 
   return (
@@ -75,28 +85,28 @@ export default function Index() {
         />
         <MetricCard
           title="Clientes Ativos"
-          value={(activeClients || 0).toString()}
-          change={8.2} // Mock change for clients
+          value={(currentMonth.active_clients || 0).toString()}
+          change={Number(clientsChange.toFixed(1))}
           icon={<Users className="h-6 w-6" />}
           variant="primary"
         />
         <MetricCard
           title="Churn Rate"
-          value={`${churnRate}%`}
-          change={-18.5} // Mock change
+          value={`${churnRate.toFixed(1)}%`}
+          change={0} // To implement change logic
           icon={<TrendingDown className="h-6 w-6" />}
           variant="success"
         />
         <MetricCard
           title="LTV:CAC"
           value={`${ltvCac}x`}
-          change={14.3}
+          change={0}
           icon={<Target className="h-6 w-6" />}
           variant="success"
         />
         <MetricCard
-          title="Runway"
-          value="18 meses"
+          title="Receita (Caixa)"
+          value={formatCurrency(currentMonth.revenue)}
           change={0}
           icon={<Wallet className="h-6 w-6" />}
           variant="warning"

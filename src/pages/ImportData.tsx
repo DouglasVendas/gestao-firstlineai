@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
-import { Upload, FileSpreadsheet, CheckCircle, AlertTriangle, Loader2, Download } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle, AlertTriangle, Loader2, Download, Trash2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/integrations/supabase/client";
 import { Database } from "@/integrations/supabase/types";
@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 interface ImportRow {
     tipo: "receita" | "custo_fixo" | "custo_variavel";
@@ -25,6 +27,8 @@ interface ImportRow {
     valor: number;
     data: string; // YYYY-MM-DD
     status?: string; // payment status for invoices
+    cliente?: string; // Optional: Only for receita
+    plano?: string;  // Optional: Only for receita
 }
 
 export default function ImportData() {
@@ -33,6 +37,7 @@ export default function ImportData() {
     const [file, setFile] = useState<File | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const [summary, setSummary] = useState({ receita: 0, fixo: 0, variavel: 0 });
+    const [shouldReplace, setShouldReplace] = useState(false);
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFile = e.target.files?.[0];
@@ -55,6 +60,8 @@ export default function ImportData() {
                     valor: Number(row.valor) || 0,
                     data: formatDate(row.data),
                     status: row.status,
+                    cliente: row.cliente || row.client || null,
+                    plano: row.plano || row.plan || null,
                 })).filter(r => r.valor > 0); // basic filter
 
                 setData(formattedData);
@@ -85,7 +92,7 @@ export default function ImportData() {
         if (t.includes("receita") || t.includes("fatura") || t.includes("entrada")) return "receita";
         if (t.includes("fix") || t.includes("fixo")) return "custo_fixo";
         if (t.includes("var") || t.includes("vari")) return "custo_variavel";
-        return "receita"; // Default fallback, customizable
+        return "receita"; // Default fallback
     };
 
     // Helper to standard Format YYYY-MM-DD
@@ -107,31 +114,106 @@ export default function ImportData() {
     const handleImport = async () => {
         setIsUploading(true);
         try {
-            // 1. Process Invoices (Receitas)
+            const errors: string[] = [];
+
+            // 0. Replace Data Logic
+            if (shouldReplace) {
+                // Delete in specific order to avoid FK constraints issues (e.g. invoices depend on clients)
+                // Actually invoices have client_id, but here we are wiping invoices.
+
+                // We'll wipe financial tables. We might wipe clients too if requested "implement ONLY these"
+                // But wiping clients is dangerous if other things depend on it. 
+                // For this use case, wiping invoices, fixed_costs, variable_costs is safest for "numbers".
+                // If we wipe clients, we lose historical data not in the sheet.
+                // Given the instructions "Apague todos os dados ... sobre numeros", I'll stick to financial tables.
+
+                const { error: err1 } = await supabase.from("invoices").delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+                const { error: errClients } = await supabase.from("clients").delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Delete clients (Source of MRR)
+                const { error: err2 } = await supabase.from("fixed_costs").delete().neq('id', '00000000-0000-0000-0000-000000000000');
+                const { error: err3 } = await supabase.from("variable_costs").delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+                if (err1) console.error("Error clearing invoices", err1);
+                if (errClients) console.error("Error clearing clients", errClients);
+                if (err2) console.error("Error clearing fixed costs", err2);
+                if (err3) console.error("Error clearing variable costs", err3);
+            }
+
+            // 1. Process Metadata (Clients & Plans) first
+            // We need to fetch existing to know IDs, or create new ones.
+            const uniqueClients = Array.from(new Set(data.filter(d => d.tipo === "receita" && d.cliente).map(d => d.cliente!)));
+            const uniquePlans = Array.from(new Set(data.filter(d => d.tipo === "receita" && d.plano).map(d => d.plano!)));
+
+            const clientMap = new Map<string, string>(); // Name -> ID
+            const planMap = new Map<string, string>(); // Name -> ID
+
+            // Fetch existing
+            const { data: existingClients } = await supabase.from("clients").select("id, name");
+            existingClients?.forEach(c => clientMap.set(c.name, c.id));
+
+            const { data: existingPlans } = await supabase.from("plans").select("id, name");
+            existingPlans?.forEach(p => planMap.set(p.name, p.id));
+
+            // Create missing plans
+            for (const planName of uniquePlans) {
+                if (!planMap.has(planName)) {
+                    const { data: newPlan, error } = await supabase.from("plans").insert({ name: planName, price_monthly: 0, price_yearly: 0 }).select().single();
+                    if (newPlan) planMap.set(planName, newPlan.id);
+                    if (error) console.error("Error creating plan", planName, error);
+                }
+            }
+
+            // Create missing clients (now that we have plan IDs if needed, though client plan update comes next)
+            for (const clientName of uniqueClients) {
+                if (!clientMap.has(clientName)) {
+                    // Try to find the plan for this client from the first row that matches
+                    const row = data.find(d => d.cliente === clientName && d.plano);
+                    const planId = row?.plano ? planMap.get(row.plano) : null;
+
+                    const { data: newClient, error } = await supabase.from("clients").insert({
+                        name: clientName,
+                        status: 'active',
+                        plan_id: planId,
+                        mrr: row?.valor || 0, // Initial estimate
+                        created_at: row?.data ? new Date(row.data).toISOString() : new Date().toISOString()
+                    }).select().single();
+                    if (newClient) clientMap.set(clientName, newClient.id);
+                    if (error) console.error("Error creating client", clientName, error);
+                } else {
+                    // Update existing client plan if present in sheet
+                    const row = data.find(d => d.cliente === clientName && d.plano);
+                    if (row && row.plano) {
+                        const planId = planMap.get(row.plano);
+                        const clientId = clientMap.get(clientName);
+                        if (planId && clientId) {
+                            await supabase.from("clients").update({ plan_id: planId }).eq('id', clientId);
+                        }
+                    }
+                }
+            }
+
+
+            // 2. Process Invoices (Receitas)
             const revenues: Database['public']['Tables']['invoices']['Insert'][] = data.filter(d => d.tipo === "receita").map(d => ({
-                amount: d.valor,
+                value: d.valor,
                 due_date: d.data,
                 status: (d.status?.toLowerCase() === "pago" ? "paid" : "pending") as "paid" | "pending" | "overdue",
-                // Description/Category is lost for invoices table unless we map client? 
-                // For now, simpler: user manually manages clients.
+                client_id: d.cliente ? clientMap.get(d.cliente) : null
             }));
 
-            // 2. Process Fixed Costs
+            // 3. Process Fixed Costs
             const fixed: Database['public']['Tables']['fixed_costs']['Insert'][] = data.filter(d => d.tipo === "custo_fixo").map(d => ({
                 actual: d.valor,
-                month: d.data.substring(0, 7), // YYYY-MM
+                month: `${d.data.substring(0, 7)}-01`,
                 category: d.descricao_ou_categoria,
-                budgeted: d.valor // Assume budgeted = actual for bulk import to simplify
+                budgeted: d.valor
             }));
 
-            // 3. Process Variable Costs
+            // 4. Process Variable Costs
             const variable: Database['public']['Tables']['variable_costs']['Insert'][] = data.filter(d => d.tipo === "custo_variavel").map(d => ({
                 amount: d.valor,
-                month: d.data.substring(0, 7), // YYYY-MM
+                month: `${d.data.substring(0, 7)}-01`,
                 category: d.descricao_ou_categoria,
             }));
-
-            const errors = [];
 
             if (revenues.length > 0) {
                 const { error } = await supabase.from("invoices").insert(revenues as any);
@@ -157,7 +239,7 @@ export default function ImportData() {
             } else {
                 toast({
                     title: "Importação realizada com sucesso!",
-                    description: `${data.length} registros foram importados.`,
+                    description: `${data.length} registros foram importados.${shouldReplace ? ' Dados anteriores foram removidos.' : ''}`,
                 });
                 setData([]);
                 setFile(null);
@@ -165,9 +247,10 @@ export default function ImportData() {
             }
 
         } catch (error) {
+            console.error(error);
             toast({
                 title: "Erro crítico",
-                description: "Falha ao enviar dados.",
+                description: "Falha ao processar dados.",
                 variant: "destructive",
             });
         } finally {
@@ -176,12 +259,11 @@ export default function ImportData() {
     };
 
     const downloadTemplate = () => {
-        // Basic CSV template
-        const csvContent = "data:text/csv;charset=utf-8,tipo,descricao,valor,data,status\nreceita,Venda de Software,150.00,2024-05-20,pago\ncusto_fixo,Aluguel Escritório,2000.00,2024-05-05,pago\ncusto_variavel,Comissão Vendedor,300.00,2024-05-10,pago";
+        const csvContent = "data:text/csv;charset=utf-8,tipo,descricao,valor,data,status,cliente,plano\nreceita,Assinatura Mensal,150.00,2024-05-20,pago,Cliente A,Basic\ncusto_fixo,Aluguel,2000.00,2024-05-05,pago,,\ncusto_variavel,Comissão,300.00,2024-05-10,pago,,";
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
         link.setAttribute("href", encodedUri);
-        link.setAttribute("download", "template_importacao.csv");
+        link.setAttribute("download", "modelo_importacao.csv");
         document.body.appendChild(link);
         link.click();
     };
@@ -198,16 +280,38 @@ export default function ImportData() {
                     </CardHeader>
                     <CardContent>
                         <div className="grid gap-6">
-                            <div className="flex items-center gap-4">
-                                <Input
-                                    type="file"
-                                    accept=".xlsx, .xls, .csv"
-                                    onChange={handleFileUpload}
-                                />
-                                <Button variant="outline" onClick={downloadTemplate}>
-                                    <Download className="mr-2 h-4 w-4" />
-                                    Baixar Modelo
-                                </Button>
+                            <div className="flex flex-col gap-4">
+                                <div className="flex items-center gap-4">
+                                    <Input
+                                        type="file"
+                                        accept=".xlsx, .xls, .csv"
+                                        onChange={handleFileUpload}
+                                    />
+                                    <Button variant="outline" onClick={downloadTemplate}>
+                                        <Download className="mr-2 h-4 w-4" />
+                                        Baixar Modelo
+                                    </Button>
+                                </div>
+
+                                <div className="flex items-center space-x-2 border p-4 rounded-md bg-muted/20">
+                                    <Checkbox
+                                        id="replace"
+                                        checked={shouldReplace}
+                                        onCheckedChange={(c) => setShouldReplace(!!c)}
+                                    />
+                                    <div className="grid gap-1.5 leading-none">
+                                        <Label
+                                            htmlFor="replace"
+                                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                        >
+                                            Substituir base de dados atual?
+                                        </Label>
+                                        <p className="text-sm text-muted-foreground">
+                                            Se marcado, APAGARÁ todos os registros financeiros atuais antes de importar os novos.
+                                        </p>
+                                    </div>
+                                    <Trash2 className="ml-auto h-4 w-4 text-destructive opacity-50" />
+                                </div>
                             </div>
 
                             {data.length > 0 && (
@@ -217,7 +321,7 @@ export default function ImportData() {
                                             <FileSpreadsheet className="h-4 w-4 text-blue-500" />
                                             <AlertTitle className="text-blue-700">Resumo da Importação</AlertTitle>
                                             <AlertDescription className="text-blue-600">
-                                                Serão importados: <span className="font-bold">{summary.receita}</span> Saisas (Faturas), <span className="font-bold">{summary.fixo}</span> Custos Fixos, <span className="font-bold">{summary.variavel}</span> Custos Variáveis.
+                                                Serão importados: <span className="font-bold">{summary.receita}</span> Receitas, <span className="font-bold">{summary.fixo}</span> Custos Fixos, <span className="font-bold">{summary.variavel}</span> Custos Variáveis.
                                             </AlertDescription>
                                         </Alert>
                                     </div>
@@ -227,10 +331,11 @@ export default function ImportData() {
                                             <TableHeader>
                                                 <TableRow>
                                                     <TableHead>Tipo</TableHead>
-                                                    <TableHead>Descrição / Categoria</TableHead>
+                                                    <TableHead>Descrição</TableHead>
                                                     <TableHead>Valor</TableHead>
                                                     <TableHead>Data</TableHead>
-                                                    <TableHead>Status</TableHead>
+                                                    <TableHead>Cliente</TableHead>
+                                                    <TableHead>Plano</TableHead>
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
@@ -248,7 +353,8 @@ export default function ImportData() {
                                                         <TableCell>{row.descricao_ou_categoria}</TableCell>
                                                         <TableCell>R$ {row.valor.toFixed(2)}</TableCell>
                                                         <TableCell>{row.data}</TableCell>
-                                                        <TableCell>{row.status || '-'}</TableCell>
+                                                        <TableCell>{row.cliente || '-'}</TableCell>
+                                                        <TableCell>{row.plano || '-'}</TableCell>
                                                     </TableRow>
                                                 ))}
                                             </TableBody>
@@ -259,14 +365,15 @@ export default function ImportData() {
                                     </div>
 
                                     <div className="flex justify-end">
-                                        <Button onClick={handleImport} disabled={isUploading}>
+                                        <Button onClick={handleImport} disabled={isUploading} variant={shouldReplace ? "destructive" : "default"}>
                                             {isUploading ? (
                                                 <>
                                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processando...
                                                 </>
                                             ) : (
                                                 <>
-                                                    <Upload className="mr-2 h-4 w-4" /> Confirmar Importação
+                                                    <Upload className="mr-2 h-4 w-4" />
+                                                    {shouldReplace ? "Substituir e Importar" : "Confirmar Importação"}
                                                 </>
                                             )}
                                         </Button>

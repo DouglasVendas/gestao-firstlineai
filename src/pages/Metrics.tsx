@@ -23,13 +23,14 @@ import {
   Pie,
   Cell,
 } from "recharts";
-import { useDashboardData } from "@/hooks/useDashboardData";
+// import { useDashboardData } from "@/hooks/useDashboardData"; // Deprecated
+import { useFinancials, MonthlyFinancials } from "@/hooks/useFinancials";
 import { useClients } from "@/hooks/useClients";
 import { formatCurrency } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Metrics() {
-  const { data: metrics, isLoading: isLoadingMetrics } = useDashboardData();
+  const { data: financials, isLoading: isLoadingMetrics } = useFinancials();
   const { data: clients, isLoading: isLoadingClients } = useClients();
 
   const {
@@ -40,8 +41,8 @@ export default function Metrics() {
     growthRate,
     mrrData
   } = useMemo(() => {
-    if (!metrics || metrics.length === 0 || !clients) return {
-      currentMetric: { mrr: 0, arr: 0, churn_rate: 0, month: "" },
+    if (!financials || financials.length === 0) return {
+      currentMetric: { mrr: 0, arr: 0, churn_rate: 0, month: "", revenue: 0, active_clients: 0 } as MonthlyFinancials,
       netNewMrr: 0,
       arpu: 0,
       arpuChange: 0,
@@ -49,57 +50,23 @@ export default function Metrics() {
       mrrData: []
     };
 
-    // Helper to get formatted month key (e.g. "2024-01")
-    const getMonthKey = (dateStr: string) => dateStr.substring(0, 7);
-    const getEndOfMonth = (monthStr: string) => {
-      const [year, month] = monthStr.split('-').map(Number);
-      return new Date(year, month, 0); // Last day of that month
-    }
-
-    // Calculate Active Customers per Month
-    const activeCustomersByMonth: Record<string, number> = {};
-    const clientperiods = clients.map(c => ({
-      start: c.start_date ? new Date(c.start_date) : new Date(c.created_at),
-      end: c.churn_date ? new Date(c.churn_date) : null
-    }));
-
-    metrics.forEach(m => {
-      const monthKey = m.month.substring(0, 7);
-      const monthEnd = getEndOfMonth(monthKey);
-
-      let active = 0;
-      clientperiods.forEach(p => {
-        if (p.start <= monthEnd && (!p.end || p.end > monthEnd)) {
-          active++;
-        }
-      });
-      activeCustomersByMonth[monthKey] = active;
-    });
-
-    const current = metrics?.[metrics.length - 1] || { mrr: 0, arr: 0, churn_rate: 0, month: "" };
-    const previous = metrics?.[metrics.length - 2] || { mrr: 0, arr: 0, month: "" };
-
-    // Get customers count for current and previous
-    const currentKey = current.month ? current.month.substring(0, 7) : "";
-    const previousKey = previous.month ? previous.month.substring(0, 7) : "";
-
-    const curCustomers = activeCustomersByMonth[currentKey] || 0;
-    const prevCustomers = activeCustomersByMonth[previousKey] || 0;
+    const current = financials[financials.length - 1];
+    const previous = financials[financials.length - 2] || { mrr: 0, arr: 0, churn_rate: 0, revenue: 0, active_clients: 0 };
 
     // Net New MRR
     const netNew = current.mrr - previous.mrr;
 
     // ARPU
-    const currArpu = curCustomers > 0 ? current.mrr / curCustomers : 0;
-    const prevArpu = prevCustomers > 0 ? previous.mrr / prevCustomers : 0;
+    const currArpu = current.active_clients > 0 ? current.mrr / current.active_clients : 0;
+    const prevArpu = previous.active_clients > 0 ? previous.mrr / previous.active_clients : 0;
     const arpuChg = prevArpu > 0 ? ((currArpu - prevArpu) / prevArpu) * 100 : 0;
 
-    // Growth Rate
+    // Growth Rate (MRR)
     const growth = previous.mrr > 0 ? ((current.mrr - previous.mrr) / previous.mrr) * 100 : 0;
 
     // MRR Data for Chart
-    const chartData = metrics?.map((m, i) => {
-      const prev = metrics[i - 1] || { mrr: 0 };
+    const chartData = financials.map((m, i) => {
+      const prev = financials[i - 1] || { mrr: 0 };
       const diff = m.mrr - prev.mrr;
       // Without real breakdown, we simplify:
       // Positive diff -> New
@@ -111,7 +78,7 @@ export default function Metrics() {
         contraction: 0, // No contraction data in current schema
         churn: diff < 0 ? Math.abs(diff) : 0
       };
-    }) || [];
+    });
 
     return {
       currentMetric: current,
@@ -121,7 +88,7 @@ export default function Metrics() {
       growthRate: growth,
       mrrData: chartData
     };
-  }, [metrics, clients]);
+  }, [financials]);
 
   const planDistribution = useMemo(() => {
     if (!clients) return [];
