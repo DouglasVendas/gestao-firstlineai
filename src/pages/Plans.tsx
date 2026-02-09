@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Edit, MoreHorizontal, Users, Check, Loader2 } from "lucide-react";
+import { Edit, MoreHorizontal, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { usePlans } from "@/hooks/usePlans";
+import { usePlans, type Plan } from "@/hooks/usePlans";
 import { CreatePlanModal } from "@/components/modals/CreatePlanModal";
+import { EditPlanModal } from "@/components/modals/EditPlanModal";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -15,11 +17,8 @@ const formatCurrency = (value: number) => {
 
 export default function Plans() {
   const { data: plans, isLoading } = usePlans();
-
-  // Mock stats for now as they require joining clients table which we can do later or add to the query
-  // For now using 0 or mock logic if needed, but sticking to basic plan props
-  const totalClients = 0; // Would come from clients count aggregation
-  const totalMRR = 0; // would come from sum(clients.mrr)
+  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -47,55 +46,40 @@ export default function Plans() {
         <CreatePlanModal />
       </div>
 
-      {/* Summary Stats - keeping static placeholder for aggregate stats or we could fetch metrics */}
+      {/* Summary Stats */}
       <div className="mb-8 grid gap-4 sm:grid-cols-3">
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Total Clientes</p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-foreground">
-            --
-          </p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-foreground">--</p>
         </div>
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">MRR Total</p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-primary">
-            --
-          </p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-primary">--</p>
         </div>
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">ARPU Médio</p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-foreground">
-            --
-          </p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-foreground">--</p>
         </div>
       </div>
 
       {/* Plans Grid */}
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
         {plans?.map((plan) => {
-          // Parse JSON features/limits if they come as string (though Supabase client types as Json)
-          // Adjust based on your actual data format in DB. We seeded as JSON arrays/objects.
           const features = Array.isArray(plan.features) ? plan.features.map(String) : [];
-          // limits
           const limits = plan.limits as any || { users: 0, storage: "", apiCalls: 0 };
 
           return (
             <div
               key={plan.id}
-              className={cn(
-                "metric-card relative flex flex-col"
-              )}
+              className={cn("metric-card relative flex flex-col")}
             >
               {/* Header */}
               <div className="mb-4 flex items-start justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-semibold text-foreground">
-                      {plan.name}
-                    </h3>
+                    <h3 className="text-lg font-semibold text-foreground">{plan.name}</h3>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {plan.description}
-                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
                 </div>
                 <Button variant="ghost" size="icon" className="h-8 w-8">
                   <MoreHorizontal className="h-4 w-4" />
@@ -122,10 +106,7 @@ export default function Plans() {
                 </p>
                 <ul className="space-y-2">
                   {features.slice(0, 4).map((feature, index) => (
-                    <li
-                      key={index}
-                      className="flex items-center gap-2 text-sm text-foreground"
-                    >
+                    <li key={index} className="flex items-center gap-2 text-sm text-foreground">
                       <Check className="h-4 w-4 text-success" />
                       {feature}
                     </li>
@@ -151,16 +132,12 @@ export default function Plans() {
                     <p className="text-muted-foreground">Usuários</p>
                   </div>
                   <div>
-                    <p className="font-mono font-medium text-foreground">
-                      {limits.storage}
-                    </p>
+                    <p className="font-mono font-medium text-foreground">{limits.storage}</p>
                     <p className="text-muted-foreground">Storage</p>
                   </div>
                   <div>
                     <p className="font-mono font-medium text-foreground">
-                      {limits.apiCalls === "unlimited"
-                        ? "∞"
-                        : limits.apiCalls}
+                      {limits.apiCalls === "unlimited" ? "∞" : limits.apiCalls}
                     </p>
                     <p className="text-muted-foreground">API/mês</p>
                   </div>
@@ -169,7 +146,14 @@ export default function Plans() {
 
               {/* Actions */}
               <div className="flex gap-2">
-                <Button variant="outline" className="flex-1">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    setSelectedPlan(plan);
+                    setEditOpen(true);
+                  }}
+                >
                   <Edit className="mr-2 h-4 w-4" />
                   Editar
                 </Button>
@@ -178,6 +162,8 @@ export default function Plans() {
           );
         })}
       </div>
+
+      <EditPlanModal plan={selectedPlan} open={editOpen} onOpenChange={setEditOpen} />
     </AppLayout>
   );
 }

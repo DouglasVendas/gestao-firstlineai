@@ -9,33 +9,55 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Search, Filter, Download, MoreHorizontal } from "lucide-react";
-import { useClients } from "@/hooks/useClients";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Search, Filter, Download, MoreHorizontal, Edit, UserX, Trash2 } from "lucide-react";
+import { useClients, type Client } from "@/hooks/useClients";
+import { useUpdateClient, useDeleteClient } from "@/hooks/useUpdateClient";
 import { ClientStatusBadge } from "@/components/clients/ClientStatusBadge";
 import { CreateClientModal } from "@/components/modals/CreateClientModal";
+import { EditClientModal } from "@/components/modals/EditClientModal";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Clients() {
   const { data: clients, isLoading } = useClients();
+  const updateClient = useUpdateClient();
+  const deleteClient = useDeleteClient();
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [editClient, setEditClient] = useState<Client | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
 
   const filteredClients = useMemo(() => {
     if (!clients) return [];
     return clients.filter((client) => {
-      const matchesSearch = client.name
-        .toLowerCase()
-        .includes(searchTerm.toLowerCase());
-      const matchesStatus =
-        statusFilter === "all" || client.status === statusFilter;
+      const matchesSearch = client.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === "all" || client.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
   }, [clients, searchTerm, statusFilter]);
 
   const { activeClients, trialClients, churnedClients } = useMemo(() => {
-    if (!clients)
-      return { activeClients: 0, trialClients: 0, churnedClients: 0 };
+    if (!clients) return { activeClients: 0, trialClients: 0, churnedClients: 0 };
     return {
       activeClients: clients.filter((c) => c.status === "active").length,
       trialClients: clients.filter((c) => c.status === "trial").length,
@@ -46,13 +68,7 @@ export default function Clients() {
   const handleExport = () => {
     if (!clients) return;
     const header = ["Nome", "Email", "Status", "MRR", "Inicio"];
-    const rows = clients.map((c) => [
-      c.name,
-      c.email || '',
-      c.status,
-      c.mrr,
-      c.start_date || '',
-    ]);
+    const rows = clients.map((c) => [c.name, c.email || '', c.status, c.mrr, c.start_date || '']);
     const csvContent =
       "data:text/csv;charset=utf-8," +
       [header.join(","), ...rows.map((e) => e.join(","))].join("\n");
@@ -63,6 +79,27 @@ export default function Clients() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleChurn = (client: Client) => {
+    updateClient.mutate(
+      { id: client.id, status: "churned", churn_date: new Date().toISOString().split("T")[0] },
+      {
+        onSuccess: () => toast({ title: "Assinatura cancelada", description: `${client.name} marcado como churned.` }),
+        onError: (err) => toast({ variant: "destructive", title: "Erro", description: err.message }),
+      }
+    );
+  };
+
+  const handleDelete = () => {
+    if (!deleteTarget) return;
+    deleteClient.mutate(deleteTarget.id, {
+      onSuccess: () => {
+        toast({ title: "Cliente excluído", description: `${deleteTarget.name} foi removido.` });
+        setDeleteTarget(null);
+      },
+      onError: (err) => toast({ variant: "destructive", title: "Erro", description: err.message }),
+    });
   };
 
   if (isLoading) {
@@ -129,27 +166,19 @@ export default function Clients() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Total de Clientes</p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-foreground">
-            {clients?.length || 0}
-          </p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-foreground">{clients?.length || 0}</p>
         </div>
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Clientes Ativos</p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-success">
-            {activeClients}
-          </p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-success">{activeClients}</p>
         </div>
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Em Trial</p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-warning">
-            {trialClients}
-          </p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-warning">{trialClients}</p>
         </div>
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Churned (Total)</p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-destructive">
-            {churnedClients}
-          </p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-destructive">{churnedClients}</p>
         </div>
       </div>
 
@@ -173,23 +202,49 @@ export default function Clients() {
                 {filteredClients.map((client) => (
                   <tr key={client.id}>
                     <td className="font-medium">{client.name}</td>
-                    <td className="text-muted-foreground">
-                      {client.email || "-"}
-                    </td>
+                    <td className="text-muted-foreground">{client.email || "-"}</td>
                     <td>{client.plan?.name || "-"}</td>
                     <td className="font-mono">{formatCurrency(client.mrr)}</td>
                     <td>
                       <ClientStatusBadge status={client.status} />
                     </td>
                     <td className="font-mono text-muted-foreground">
-                      {client.start_date
-                        ? formatDate(client.start_date)
-                        : "-"}
+                      {client.start_date ? formatDate(client.start_date) : "-"}
                     </td>
                     <td>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setEditClient(client);
+                              setEditOpen(true);
+                            }}
+                          >
+                            <Edit className="mr-2 h-4 w-4" />
+                            Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleChurn(client)}
+                            disabled={client.status === "churned"}
+                          >
+                            <UserX className="mr-2 h-4 w-4" />
+                            Cancelar assinatura
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => setDeleteTarget(client)}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Excluir
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   </tr>
                 ))}
@@ -197,12 +252,8 @@ export default function Clients() {
             </table>
           ) : (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <p className="text-lg font-medium text-muted-foreground">
-                Nenhum cliente encontrado
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Mude os filtros ou adicione um novo cliente.
-              </p>
+              <p className="text-lg font-medium text-muted-foreground">Nenhum cliente encontrado</p>
+              <p className="text-sm text-muted-foreground">Mude os filtros ou adicione um novo cliente.</p>
               <div className="mt-4">
                 <CreateClientModal />
               </div>
@@ -210,6 +261,25 @@ export default function Clients() {
           )}
         </div>
       </div>
+
+      <EditClientModal client={editClient} open={editOpen} onOpenChange={setEditOpen} />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir cliente</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir {deleteTarget?.name}? Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }

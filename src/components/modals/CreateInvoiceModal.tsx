@@ -38,7 +38,6 @@ const formSchema = z.object({
     value: z.coerce.number().min(0.01, "Valor deve ser maior que zero"),
     due_date: z.string().min(1, "Data de vencimento obrigatória"),
     status: z.enum(["paid", "pending", "overdue", "canceled"]),
-    description: z.string().optional(),
 });
 
 export function CreateInvoiceModal() {
@@ -60,7 +59,7 @@ export function CreateInvoiceModal() {
         createInvoice.mutate(
             {
                 ...values,
-                paid_at: values.status === "paid" ? new Date().toISOString() : null,
+                paid_date: values.status === "paid" ? new Date().toISOString().split("T")[0] : null,
             },
             {
                 onSuccess: () => {
@@ -172,19 +171,6 @@ export function CreateInvoiceModal() {
                                             <SelectItem value="overdue">Atrasado</SelectItem>
                                         </SelectContent>
                                     </Select>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <FormField
-                            control={form.control}
-                            name="description"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Descrição (Opcional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="Ref. Mês Janeiro" {...field} />
-                                    </FormControl>
                                     <FormMessage />
                                 </FormItem>
                             )}
