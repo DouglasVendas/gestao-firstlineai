@@ -22,26 +22,12 @@ import {
 } from "recharts";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useFinancials } from "@/hooks/useFinancials";
 
-const sensitivityData = [
-  { multiplo: "8x", conservador: 28800000, base: 33600000, otimista: 38400000 },
-  { multiplo: "10x", conservador: 36000000, base: 42000000, otimista: 48000000 },
-  { multiplo: "12x", conservador: 43200000, base: 50400000, otimista: 57600000 },
-  { multiplo: "15x", conservador: 54000000, base: 63000000, otimista: 72000000 },
-];
-
-const waterfallData = [
-  { name: "ARR Base", value: 42000000, isTotal: false },
-  { name: "Growth Premium", value: 8400000, isTotal: false },
-  { name: "NRR Premium", value: 4200000, isTotal: false },
-  { name: "Margin Premium", value: 2100000, isTotal: false },
-  { name: "Private Discount", value: -8400000, isTotal: false },
-  { name: "Valuation Final", value: 48300000, isTotal: true },
-];
+// Dynamics moved inside component
 
 export default function Valuation() {
-  const { data: metrics, isLoading } = useDashboardData();
+  const { data: financials, isLoading } = useFinancials();
   const [inputs, setInputs] = useState({
     arr: 4200000,
     growthRate: 85,
@@ -53,9 +39,9 @@ export default function Valuation() {
   });
 
   useEffect(() => {
-    if (metrics && metrics.length > 0) {
-      const current = metrics[metrics.length - 1];
-      const previous = metrics[metrics.length - 13] || metrics[0]; // Try to get YoY or fallback to start
+    if (financials && financials.length > 0) {
+      const current = financials[financials.length - 1];
+      const previous = financials[financials.length - 13] || financials[0]; // Try to get YoY or fallback to start
 
       const arr = current.arr || (current.mrr * 12) || 0;
       let growthRate = 0;
@@ -71,7 +57,7 @@ export default function Valuation() {
         growthRate: Math.round(growthRate) || 0
       }));
     }
-  }, [metrics]);
+  }, [financials]);
 
   if (isLoading) {
     return (
@@ -91,11 +77,28 @@ export default function Valuation() {
 
   const adjustedValuation = baseValuation * (1 + growthAdjustment + nrrAdjustment + marginAdjustment) * (1 - privateDiscount);
 
+  // Create dynamic scenarios and sensitivity data based on inputs
   const scenarios = {
     conservador: adjustedValuation * 0.8,
     base: adjustedValuation,
     otimista: adjustedValuation * 1.2,
   };
+
+  const sensitivityData = [
+    { multiplo: `${Math.max(3, inputs.multiplo - 4)}x`, conservador: inputs.arr * Math.max(3, inputs.multiplo - 4) * 0.8, base: inputs.arr * Math.max(3, inputs.multiplo - 4), otimista: inputs.arr * Math.max(3, inputs.multiplo - 4) * 1.2 },
+    { multiplo: `${Math.max(3, inputs.multiplo - 2)}x`, conservador: inputs.arr * Math.max(3, inputs.multiplo - 2) * 0.8, base: inputs.arr * Math.max(3, inputs.multiplo - 2), otimista: inputs.arr * Math.max(3, inputs.multiplo - 2) * 1.2 },
+    { multiplo: `${inputs.multiplo}x`, conservador: baseValuation * 0.8, base: baseValuation, otimista: baseValuation * 1.2 },
+    { multiplo: `${inputs.multiplo + 2}x`, conservador: inputs.arr * (inputs.multiplo + 2) * 0.8, base: inputs.arr * (inputs.multiplo + 2), otimista: inputs.arr * (inputs.multiplo + 2) * 1.2 },
+  ];
+
+  const waterfallData = [
+    { name: "ARR Base", value: baseValuation, isTotal: false },
+    { name: "Growth Premium", value: baseValuation * growthAdjustment, isTotal: false },
+    { name: "NRR Premium", value: baseValuation * nrrAdjustment, isTotal: false },
+    { name: "Margin Premium", value: baseValuation * marginAdjustment, isTotal: false },
+    { name: "Private Discount", value: -(baseValuation * (1 + growthAdjustment + nrrAdjustment + marginAdjustment) * privateDiscount), isTotal: false },
+    { name: "Valuation Final", value: adjustedValuation, isTotal: true },
+  ];
 
   return (
     <AppLayout

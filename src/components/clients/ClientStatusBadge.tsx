@@ -10,10 +10,11 @@ interface ClientStatusBadgeProps {
 
 const getStatusConfig = (status: string) => {
     const config: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className: string }> = {
-        active: { label: "Ativo", variant: "default", className: "bg-success hover:bg-success/90 text-success-foreground" },
+        active: { label: "Adimplente", variant: "default", className: "bg-success hover:bg-success/90 text-success-foreground" },
         trial: { label: "Trial", variant: "secondary", className: "bg-warning hover:bg-warning/90 text-warning-foreground" },
         churned: { label: "Cancelado", variant: "destructive", className: "" },
         inactive: { label: "Inativo", variant: "outline", className: "text-muted-foreground" },
+        overdue: { label: "Inadimplente", variant: "destructive", className: "bg-red-500 hover:bg-red-600 text-white" },
     };
     return config[status] || config.inactive;
 };

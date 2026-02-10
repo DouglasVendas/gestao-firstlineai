@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Search, Filter, Download, MoreHorizontal, Edit, UserX, Trash2 } from "lucide-react";
 import { useClients, type Client } from "@/hooks/useClients";
+import { useInvoices } from "@/hooks/useInvoices";
 import { useUpdateClient, useDeleteClient } from "@/hooks/useUpdateClient";
 import { ClientStatusBadge } from "@/components/clients/ClientStatusBadge";
 import { CreateClientModal } from "@/components/modals/CreateClientModal";
@@ -38,6 +39,7 @@ import { useToast } from "@/hooks/use-toast";
 
 export default function Clients() {
   const { data: clients, isLoading } = useClients();
+  const { data: invoices } = useInvoices();
   const updateClient = useUpdateClient();
   const deleteClient = useDeleteClient();
   const { toast } = useToast();
@@ -49,12 +51,26 @@ export default function Clients() {
 
   const filteredClients = useMemo(() => {
     if (!clients) return [];
-    return clients.filter((client) => {
+
+    const computed = clients.map(client => {
+      let derived = client.status;
+      // If client is active, check for overdue invoices
+      if (derived === 'active' && invoices) {
+        const hasOverdue = invoices.some(inv =>
+          inv.client_id === client.id &&
+          (inv.status === 'overdue' || (inv.status === 'pending' && new Date(inv.due_date) < new Date()))
+        );
+        if (hasOverdue) derived = 'overdue';
+      }
+      return { ...client, status: derived };
+    });
+
+    return computed.filter((client) => {
       const matchesSearch = client.name.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === "all" || client.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [clients, searchTerm, statusFilter]);
+  }, [clients, invoices, searchTerm, statusFilter]);
 
   const { activeClients, trialClients, churnedClients } = useMemo(() => {
     if (!clients) return { activeClients: 0, trialClients: 0, churnedClients: 0 };
@@ -190,7 +206,6 @@ export default function Clients() {
               <thead className="bg-muted/50">
                 <tr>
                   <th>Cliente</th>
-                  <th>Email</th>
                   <th>Plano</th>
                   <th>MRR</th>
                   <th>Status</th>
@@ -202,7 +217,6 @@ export default function Clients() {
                 {filteredClients.map((client) => (
                   <tr key={client.id}>
                     <td className="font-medium">{client.name}</td>
-                    <td className="text-muted-foreground">{client.email || "-"}</td>
                     <td>{client.plan?.name || "-"}</td>
                     <td className="font-mono">{formatCurrency(client.mrr)}</td>
                     <td>

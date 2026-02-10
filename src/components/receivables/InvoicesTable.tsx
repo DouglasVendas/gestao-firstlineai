@@ -29,17 +29,36 @@ const statusConfig: Record<string, { label: string; variant: "default" | "second
   cancelled: { label: "Cancelado", variant: "outline", className: "bg-muted text-muted-foreground" },
 };
 
-export function InvoicesTable() {
-  const { data: invoices, isLoading } = useInvoices();
+interface InvoicesTableProps {
+  data?: Invoice[];
+}
+
+export function InvoicesTable({ data }: InvoicesTableProps) {
+  // If data is provided via props, use it. Otherwise fetch (legacy behavior or if used elsewhere without filters)
+  // But we want to rely on parent data if provided.
+  const { data: fetchedInvoices, isLoading } = useInvoices();
+
+  const invoices = data || fetchedInvoices;
+
   const { toast } = useToast();
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
 
-  if (isLoading) {
+  // If we are waiting for data
+  if (isLoading && !data) {
     return (
       <div className="flex h-[200px] items-center justify-center rounded-lg border border-border">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  // If no data found
+  if (invoices && invoices.length === 0) {
+    return (
+      <div className="flex h-[200px] items-center justify-center rounded-lg border border-border text-muted-foreground">
+        Nenhuma fatura encontrada.
       </div>
     );
   }

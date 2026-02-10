@@ -22,6 +22,8 @@ import Settings from "./pages/Settings";
 import ImportData from "./pages/ImportData";
 import NotFound from "./pages/NotFound";
 
+import { AIChat } from "@/components/AIChat";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -29,6 +31,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      <AIChat />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />

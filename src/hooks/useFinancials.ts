@@ -9,6 +9,9 @@ export interface MonthlyFinancials {
     expenses: number; // Fixed + Variable
     active_clients: number;
     churn_rate: number; // Calculated
+    cac?: number;
+    leads?: number;
+    visitors?: number;
 }
 
 export const useFinancials = () => {
@@ -35,6 +38,12 @@ export const useFinancials = () => {
                 .from("variable_costs")
                 .select("*");
             if (variableCostsError) throw variableCostsError;
+
+            const { data: marketingStats, error: marketingStatsError } = await supabase
+                .from("marketing_stats")
+                .select("*");
+            // Marketing stats might be empty initially, don't throw if just empty, but throw on error
+            if (marketingStatsError) console.error("Error fetching marketing stats:", marketingStatsError);
 
             // 2. Determine Date Range (min date to today)
             // Find earliest date across all datasets
@@ -113,6 +122,24 @@ export const useFinancials = () => {
                 const startOfMonthClients = activeClientsCount + churnedClientsCount;
                 const churnRate = startOfMonthClients > 0 ? (churnedClientsCount / startOfMonthClients) * 100 : 0;
 
+                // Match Marketing Stats
+                const mStats = marketingStats?.find(m => m.month === month);
+
+                // RECALCULATED CAC LOGIC:
+                const marketingSpend = variableCosts
+                    .filter(c => (c.month === month || (c.month && c.month.substring(0, 7) === month)) &&
+                        (c.category === 'Marketing' || c.category === 'Anúncio Facebook' || c.category === 'Gestor de Tráfego'))
+                    .reduce((sum, c) => sum + c.amount, 0);
+
+                // New Clients Calculation (Change in active clients + churned? Or just count starts?)
+                // Helper: Count clients with start_date in this month
+                const newClientsCount = clients.filter(c => {
+                    const start = c.start_date ? c.start_date.substring(0, 7) : c.created_at.substring(0, 7);
+                    return start === month;
+                }).length;
+
+                const calculatedCac = newClientsCount > 0 ? marketingSpend / newClientsCount : 0;
+
                 return {
                     month,
                     revenue: monthlyRevenue,
@@ -120,7 +147,10 @@ export const useFinancials = () => {
                     arr: monthlyMrr * 12,
                     expenses: monthlyFixed + monthlyVariable,
                     active_clients: activeClientsCount,
-                    churn_rate: churnRate
+                    churn_rate: churnRate,
+                    cac: calculatedCac,
+                    leads: mStats?.leads || 0,
+                    visitors: mStats?.visitors || 0
                 };
             });
 

@@ -1,9 +1,10 @@
+import { useState, useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { FileText, Download, TrendingUp, TrendingDown, Minus, Loader2 } from "lucide-react";
+import { FileText, Download, TrendingUp, TrendingDown, Minus, Loader2, Calendar as CalendarIcon, Filter } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -13,13 +14,23 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
-  ReferenceLine,
 } from "recharts";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useFinancials } from "@/hooks/useFinancials";
 import { useFixedCosts } from "@/hooks/useFixedCosts";
 import { useVariableCosts } from "@/hooks/useVariableCosts";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { ptBR } from "date-fns/locale";
+import { format, parseISO, startOfMonth } from "date-fns";
 
 interface DRELine {
   label: string;
@@ -31,9 +42,31 @@ interface DRELine {
 }
 
 export default function Dre() {
-  const { data: metrics, isLoading: isLoadingMetrics } = useDashboardData();
+  const { data: financials, isLoading: isLoadingMetrics } = useFinancials();
   const { data: fixedCosts, isLoading: isLoadingFixed } = useFixedCosts();
   const { data: variableCosts, isLoading: isLoadingVariable } = useVariableCosts();
+
+  const [date, setDate] = useState<Date>(new Date()); // Default to current date
+
+  const selectedMonthStr = useMemo(() => {
+    return format(date, 'yyyy-MM');
+  }, [date]);
+
+  // Filter data for the selected month
+  const currentMetric = useMemo(() => {
+    return financials?.find(m => m.month === selectedMonthStr) || { revenue: 0, mrr: 0, expenses: 0 };
+  }, [financials, selectedMonthStr]);
+
+  const currentFixedCosts = useMemo(() => {
+    if (!fixedCosts) return [];
+    return fixedCosts.filter(c => c.month === selectedMonthStr || (c.month && c.month.substring(0, 7) === selectedMonthStr));
+  }, [fixedCosts, selectedMonthStr]);
+
+  const currentVariableCosts = useMemo(() => {
+    if (!variableCosts) return [];
+    return variableCosts.filter(c => c.month === selectedMonthStr || (c.month && c.month.substring(0, 7) === selectedMonthStr));
+  }, [variableCosts, selectedMonthStr]);
+
 
   if (isLoadingMetrics || isLoadingFixed || isLoadingVariable) {
     return (
@@ -45,83 +78,87 @@ export default function Dre() {
     );
   }
 
-  // Get latest month data
-  const currentMetric = metrics?.[metrics.length - 1] || { revenue: 0, mrr: 0, expenses: 0 };
-
   // Totals
-  const totalFixed = fixedCosts?.reduce((acc, c) => acc + c.actual, 0) || 0;
-  const totalVariable = variableCosts?.reduce((acc, c) => acc + c.amount, 0) || 0;
+  const totalFixed = currentFixedCosts.reduce((acc, c) => acc + c.actual, 0);
 
   // Calculate DRE items
-  const receitaBruta = currentMetric.revenue || currentMetric.mrr; // Fallback to MRR if revenue empty
-  const impostos = receitaBruta * 0.08; // Est. Tax 8%
+  const receitaBruta = currentMetric.revenue || currentMetric.mrr || 0;
+
+  const impostosReais = currentVariableCosts
+    .filter(c => ['Impostos', 'DARF', 'Simples Nacional', 'Taxas'].includes(c.category) || c.category.toUpperCase().includes('DARF') || c.category.toUpperCase().includes('SIMPLES'))
+    .reduce((acc, c) => acc + c.amount, 0);
+
+  const impostos = impostosReais;
+
   const receitaLiquida = receitaBruta - impostos;
+
+  // Total Variable excluding Taxes (since we deducted above)
+  const totalVariable = currentVariableCosts
+    .filter(c => !['Impostos', 'DARF', 'Simples Nacional', 'Taxas'].includes(c.category) && !c.category.toUpperCase().includes('DARF') && !c.category.toUpperCase().includes('SIMPLES'))
+    .reduce((acc, c) => acc + c.amount, 0);
+
   const margemContribuicao = receitaLiquida - totalVariable;
   const ebitda = margemContribuicao - totalFixed;
-  const depAmort = 2500; // Static estimate
+  const depAmort = 0; // No real data for this yet, assuming 0/clean for now or we could add a manual entry. User wants REAL data.
   const ebit = ebitda - depAmort;
-  const resFinanceiro = -350; // Static estimate
+  const resFinanceiro = 0; // Same as above
   const lucroAntesIR = ebit + resFinanceiro;
-  const irCsll = lucroAntesIR > 0 ? lucroAntesIR * 0.15 : 0;
+  const irCsll = 0; // If Simples, usually included in taxes above. If lucro real/presumido, separate. Assuming Simples for now based on data.
   const lucroLiquido = lucroAntesIR - irCsll;
 
   const dreData: DRELine[] = [
-    { label: "RECEITA BRUTA", actual: receitaBruta, budgeted: receitaBruta * 1.05, isHeader: true },
-    { label: "MRR Total", actual: currentMetric.mrr, budgeted: currentMetric.mrr * 1.02, indent: 1 },
-    { label: "Serviços/Extras", actual: receitaBruta - currentMetric.mrr, budgeted: 5000, indent: 1 },
+    { label: "RECEITA BRUTA", actual: receitaBruta, budgeted: 0, isHeader: true }, // Budgeted 0 for now as we cleaned budget
+    { label: "Receita de Vendas/Serviços", actual: receitaBruta, budgeted: 0, indent: 1 },
 
-    { label: "(-) DEDUÇÕES", actual: -impostos, budgeted: -(receitaBruta * 1.05 * 0.08), isHeader: true },
-    { label: "Impostos sobre Receita", actual: -impostos, budgeted: -(receitaBruta * 1.05 * 0.08), indent: 1 },
+    { label: "(-) DEDUÇÕES (Impostos)", actual: -impostos, budgeted: 0, isHeader: true },
 
-    { label: "= RECEITA LÍQUIDA", actual: receitaLiquida, budgeted: receitaLiquida * 1.05, isTotal: true },
+    { label: "= RECEITA LÍQUIDA", actual: receitaLiquida, budgeted: 0, isTotal: true },
 
-    { label: "(-) CUSTOS VARIÁVEIS", actual: -totalVariable, budgeted: -totalVariable * 0.95, isHeader: true },
-    // We could list variable categories here by mapping variableCosts
-    ...(variableCosts?.map(vc => ({
-      label: vc.category,
-      actual: -vc.amount,
-      budgeted: -vc.amount * 0.9,
-      indent: 1
-    })) || []),
+    { label: "(-) CUSTOS VARIÁVEIS", actual: -totalVariable, budgeted: 0, isHeader: true },
+    ...(currentVariableCosts
+      .filter(c => !['Impostos', 'DARF', 'Simples Nacional', 'Taxas'].includes(c.category) && !c.category.toUpperCase().includes('DARF'))
+      .map(vc => ({
+        label: vc.category,
+        actual: -vc.amount,
+        budgeted: 0,
+        indent: 1
+      })) || []),
 
-    { label: "= MARGEM DE CONTRIBUIÇÃO", actual: margemContribuicao, budgeted: margemContribuicao * 1.05, isTotal: true },
+    { label: "= MARGEM DE CONTRIBUIÇÃO", actual: margemContribuicao, budgeted: 0, isTotal: true },
 
-    { label: "(-) CUSTOS FIXOS", actual: -totalFixed, budgeted: -totalFixed * 0.98, isHeader: true },
-    // We could list fixed categories here
-    ...(fixedCosts?.map(fc => ({
+    { label: "(-) CUSTOS FIXOS", actual: -totalFixed, budgeted: 0, isHeader: true },
+    ...(currentFixedCosts.map(fc => ({
       label: fc.category,
       actual: -fc.actual,
-      budgeted: -fc.budgeted,
+      budgeted: -fc.budgeted || 0,
       indent: 1
     })) || []),
 
-    { label: "= EBITDA", actual: ebitda, budgeted: ebitda * 1.1, isTotal: true },
+    { label: "= EBITDA", actual: ebitda, budgeted: 0, isTotal: true },
 
-    { label: "(-) Depreciação", actual: -depAmort, budgeted: -depAmort, indent: 1 },
+    { label: "(-) Depreciação/Amortização", actual: -depAmort, budgeted: 0, indent: 1 },
 
-    { label: "= EBIT", actual: ebit, budgeted: ebit * 1.1, isTotal: true },
+    { label: "= EBIT", actual: ebit, budgeted: 0, isTotal: true },
 
-    { label: "Resultado Financeiro", actual: resFinanceiro, budgeted: resFinanceiro, indent: 1 },
+    { label: "Resultado Financeiro", actual: resFinanceiro, budgeted: 0, indent: 1 },
 
-    { label: "= RESULTADO ANTES IR", actual: lucroAntesIR, budgeted: lucroAntesIR * 1.1, isTotal: true },
+    { label: "= RESULTADO ANTES IR", actual: lucroAntesIR, budgeted: 0, isTotal: true },
 
-    { label: "(-) IR/CSLL", actual: -irCsll, budgeted: -irCsll * 1.1, indent: 1 },
+    { label: "(-) IR/CSLL", actual: -irCsll, budgeted: 0, indent: 1 },
 
-    { label: "= LUCRO LÍQUIDO", actual: lucroLiquido, budgeted: lucroLiquido * 1.1, isTotal: true },
+    { label: "= LUCRO LÍQUIDO", actual: lucroLiquido, budgeted: 0, isTotal: true },
   ];
 
-  // Simplified chart data - reusing aggregates for mock history if needed or actual if available ??
-  // We can map metrics to monthlyComparison if metrics has historical data
-  const monthlyComparison = metrics?.slice(-6).map(m => {
-    // We need historical costs. Assuming fixed/variable costs are roughly relative to MRR or constant for MVP trend
-    // This is an approximation since we don't have historical cost tables
-    const r = m.revenue || m.mrr;
-    const estCosts = r * 0.7; // Mock cost history
+  // Chart Data - Evolution of last 6 months or year to date?
+  // Use financials history
+  const monthlyComparison = financials?.slice(-6).map(m => {
+    const r = m.revenue || 0;
+    const exp = m.expenses || 0; // Total expenses from metrics
     return {
-      month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }),
+      month: typeof m.month === 'string' && m.month.length >= 7 ? format(parseISO(m.month + '-01'), 'MMM', { locale: ptBR }) : m.month,
       receita: r,
-      custos: estCosts,
-      ebitda: r - estCosts
+      custos: exp,
+      ebitda: r - exp // Simplified for chart
     };
   }) || [];
 
@@ -135,14 +172,35 @@ export default function Dre() {
       subtitle="Demonstrativo de Resultado do Exercício"
     >
       {/* Actions */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <Tabs defaultValue="mensal" className="w-auto">
-          <TabsList>
-            <TabsTrigger value="mensal">Mensal</TabsTrigger>
-            <TabsTrigger value="trimestral">Trimestral</TabsTrigger>
-            <TabsTrigger value="anual">Anual</TabsTrigger>
-          </TabsList>
-        </Tabs>
+      <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+
+        {/* Date Filter */}
+        <div className="flex items-center gap-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant={"outline"}
+                className={cn(
+                  "w-[240px] justify-start text-left font-normal",
+                  !date && "text-muted-foreground"
+                )}
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {date ? format(date, "MMMM yyyy", { locale: ptBR }) : <span>Selecione uma data</span>}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={date}
+                onSelect={(d) => d && setDate(d)}
+                initialFocus
+                disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+
         <div className="flex gap-2">
           <Button variant="outline">
             <Download className="mr-2 h-4 w-4" />
@@ -165,7 +223,7 @@ export default function Dre() {
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Margem Bruta</p>
+            <p className="text-sm text-muted-foreground">Margem de Contribuição</p>
             <p className="text-2xl font-bold text-success">{margemBruta}%</p>
           </CardContent>
         </Card>
@@ -188,8 +246,8 @@ export default function Dre() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="flex items-center justify-between text-lg">
-              <span>Janeiro 2024</span>
-              <Badge variant="outline">Comparativo: Realizado vs Orçado</Badge>
+              <span className="capitalize">{format(date, "MMMM yyyy", { locale: ptBR })}</span>
+              <Badge variant="outline">Visão Gerencial</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -199,22 +257,20 @@ export default function Dre() {
                   <tr className="border-b border-border">
                     <th className="py-3 text-left text-sm font-medium text-muted-foreground">Descrição</th>
                     <th className="py-3 text-right text-sm font-medium text-muted-foreground">Realizado</th>
-                    <th className="py-3 text-right text-sm font-medium text-muted-foreground">Orçado</th>
-                    <th className="py-3 text-right text-sm font-medium text-muted-foreground">Var. %</th>
                     <th className="py-3 text-right text-sm font-medium text-muted-foreground">AV %</th>
                   </tr>
                 </thead>
                 <tbody>
                   {dreData.map((row, idx) => {
-                    const variance = row.budgeted !== 0 ? ((row.actual - row.budgeted) / Math.abs(row.budgeted)) * 100 : 0;
-                    const isPositive = row.actual >= 0 ? variance > 0 : variance < 0;
                     const verticalAnalysis = receitaLiquida !== 0 ? (row.actual / receitaLiquida) * 100 : 0;
+
+                    if (row.actual === 0 && !row.isHeader && !row.isTotal) return null; // Hide empty rows if not structure
 
                     return (
                       <tr
                         key={idx}
                         className={cn(
-                          "border-b border-border/50",
+                          "border-b border-border/50 hover:bg-muted/10 transition-colors",
                           row.isHeader && "bg-muted/30",
                           row.isTotal && "bg-primary/5 font-semibold"
                         )}
@@ -238,22 +294,7 @@ export default function Dre() {
                           {formatCurrency(row.actual)}
                         </td>
                         <td className="py-2 text-right text-sm text-muted-foreground tabular-nums">
-                          {formatCurrency(row.budgeted)}
-                        </td>
-                        <td className="py-2 text-right text-sm">
-                          <span className={cn(
-                            "inline-flex items-center gap-1",
-                            isPositive ? "text-success" : "text-destructive"
-                          )}>
-                            {variance !== 0 && (
-                              isPositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />
-                            )}
-                            {variance === 0 ? <Minus className="h-3 w-3" /> : null}
-                            {Math.abs(variance).toFixed(1)}%
-                          </span>
-                        </td>
-                        <td className="py-2 text-right text-sm text-muted-foreground tabular-nums">
-                          {row.isTotal || row.isHeader ? `${Math.abs(verticalAnalysis).toFixed(1)}%` : ""}
+                          {row.isTotal || row.isHeader || Math.abs(verticalAnalysis) > 0 ? `${Math.abs(verticalAnalysis).toFixed(1)}%` : ""}
                         </td>
                       </tr>
                     );
@@ -267,7 +308,7 @@ export default function Dre() {
         {/* Monthly Chart */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Evolução Mensal</CardTitle>
+            <CardTitle className="text-lg">Evolução Mensal (Últimos 6 meses)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-[400px]">
