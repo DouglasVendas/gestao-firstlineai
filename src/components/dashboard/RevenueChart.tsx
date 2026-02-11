@@ -7,7 +7,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useFinancialHistory } from "@/hooks/useFinancialMetrics";
 import { Loader2 } from "lucide-react";
 
 const formatCurrency = (value: number) => {
@@ -45,7 +45,8 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export function RevenueChart() {
-  const { data: metrics, isLoading } = useDashboardData();
+  const history = useFinancialHistory();
+  const isLoading = history.length === 0;
 
   if (isLoading) {
     return (
@@ -55,12 +56,11 @@ export function RevenueChart() {
     );
   }
 
-  const chartData = metrics?.map(m => ({
-    month: new Date(m.month).toLocaleDateString('pt-BR', { month: 'short' }),
+  const chartData = history.map(m => ({
+    month: new Date(m.month + '-01').toLocaleDateString('pt-BR', { month: 'short' }),
     mrr: m.mrr,
     arr: m.arr,
-    // Ensure numeric values
-  })) || [];
+  }));
 
   return (
     <div className="metric-card animate-slide-up">

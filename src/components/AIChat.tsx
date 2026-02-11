@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, X, MessageSquare, Sparkles, Maximize2, Minimize2 } from 'lucide-react';
+import { Send, X, Sparkles, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -16,13 +16,15 @@ interface Message {
 }
 
 import { generateFinancialResponse, FinancialContext } from '@/services/ai';
-import { useFinancials } from '@/hooks/useFinancials';
+import { useFinancialSnapshot } from '@/hooks/useFinancialMetrics';
 
 export function AIChat() {
     const [isOpen, setIsOpen] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
     const [input, setInput] = useState('');
-    const { data: financials } = useFinancials();
+
+    // Replace legacy useFinancials with snapshot
+    const { current, previous } = useFinancialSnapshot();
 
     const { messages, addMessage } = useChatHistory([
         {
@@ -59,18 +61,21 @@ export function AIChat() {
         try {
             // Prepare Context
             let context: FinancialContext | null = null;
-            if (financials && financials.length > 0) {
-                const current = financials[financials.length - 1];
-                const previous = financials[financials.length - 2];
+            if (current) {
+                // Calculate growth from previous
+                let growth = 0;
+                if (previous && previous.mrr > 0) {
+                    growth = ((current.mrr - previous.mrr) / previous.mrr) * 100;
+                }
 
                 context = {
                     mrr: current.mrr,
                     arr: current.arr,
-                    growth: previous?.mrr ? ((current.mrr - previous.mrr) / previous.mrr) * 100 : 0,
+                    growth: growth,
                     revenue: current.revenue,
-                    expenses: current.expenses,
-                    active_clients: current.active_clients,
-                    churn_rate: current.churn_rate,
+                    expenses: current.totalExpenses,
+                    active_clients: current.activeClients,
+                    churn_rate: current.churnRate,
                     last_month: current.month
                 };
             }

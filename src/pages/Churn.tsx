@@ -24,12 +24,14 @@ import {
 } from "recharts";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import { useDashboardData } from "@/hooks/useDashboardData";
-import { useClients } from "@/hooks/useClients";
+import { useFinancialData } from "@/contexts/FinancialContext";
+import { useFinancialSnapshot, useFinancialHistory } from "@/hooks/useFinancialMetrics";
+import { isSameMonth, parseISO, startOfMonth } from "date-fns";
 
 export default function Churn() {
-  const { data: metrics, isLoading: isLoadingMetrics } = useDashboardData();
-  const { data: clients, isLoading: isLoadingClients } = useClients();
+  const { clients, selectedMonth, isLoading: isLoadingData } = useFinancialData();
+  const { current, isLoading: isLoadingSnapshot } = useFinancialSnapshot();
+  const history = useFinancialHistory();
 
   // Dynamic Cohort Analysis Calculation
   const cohortData = useMemo(() => {
@@ -39,10 +41,11 @@ export default function Churn() {
     const cohorts: Record<string, { total: number; retained: Record<number, number> }> = {};
 
     clients.forEach(client => {
-      if (!client.start_date) return;
+      const startDateStr = client.start_date || client.created_at;
+      if (!startDateStr) return;
 
-      const startDate = new Date(client.start_date);
-      const cohortKey = startDate.toLocaleString('default', { month: 'short', year: 'numeric' }); // e.g., "Jan 2024"
+      const startDate = new Date(startDateStr);
+      const cohortKey = startDate.toLocaleString('pt-BR', { month: 'short', year: 'numeric' }); // e.g., "jan. 2024"
 
       if (!cohorts[cohortKey]) {
         cohorts[cohortKey] = { total: 0, retained: {} };
@@ -71,7 +74,17 @@ export default function Churn() {
 
     // Format for table
     return Object.entries(cohorts)
-      .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime()) // Sort by date might be tricky with "Jan 2024" format, simplifying to just take last 5
+      .sort((a, b) => {
+        // Sort by date from string is tricky, let's try to parse back or rely on order of insertion if chronological
+        // A simple parse:
+        const months = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+        const parsePTDate = (str: string) => {
+          const [m, y] = str.split('. ');
+          const mi = months.indexOf(m.toLowerCase());
+          return new Date(parseInt(y), mi);
+        };
+        return parsePTDate(a[0]).getTime() - parsePTDate(b[0]).getTime();
+      })
       .slice(-5)
       .map(([cohort, data]) => ({
         cohort,
@@ -83,26 +96,33 @@ export default function Churn() {
   }, [clients]);
 
 
-  const { churnEvolutionData, atRiskClients, cancellations, currentChurnRate, churnedRevenue } = useMemo(() => {
-    if (!metrics || !clients) return {
+  const { churnEvolutionData, atRiskClients, cancellations, currentChurnRate, churnedRevenue, revenueChurnRate } = useMemo(() => {
+    if (!history || !clients || !current) return {
       churnEvolutionData: [],
       atRiskClients: [],
       cancellations: [],
       currentChurnRate: 0,
-      churnedRevenue: 0
+      churnedRevenue: 0,
+      revenueChurnRate: 0
     };
 
     // Transform metrics for chart
-    const evolutionData = metrics?.map(m => ({
-      month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }),
-      churnRate: m.churn_rate,
-      revenueChurn: m.churn_rate * 1.15 // Mock revenue churn implication if specific data missing
-    })) || [];
+    const evolutionData = history.map(m => ({
+      month: new Date(m.month + '-01').toLocaleString('pt-BR', { month: 'short' }),
+      churnRate: m.churnRate,
+      // We don't have historical Revenue Churn in simple history hook yet. 
+      // For now, let's omit or approximate. 
+      // Approximating that revenue churn follows client churn pattern for visualization:
+      revenueChurn: m.churnRate // Placeholder
+    }));
 
-    // Clients at Risk - since we don't have health_score, skip or show none
+    // Clients at Risk - using Mock logic based on "Trial" expiring or similar?
+    // Or just filter 'Trial' status clients who are close to end date?
+    // User logic previously was empty.
     const atRisk: typeof clients = [];
 
-    // Recent Cancellations
+    // Recent Cancellations (Global or Month?)
+    // "Recent Cancellations" usually implies the latest ones.
     const cancelled = clients.filter(c => c.status === 'churned')
       .sort((a, b) => {
         const dateA = a.churn_date ? new Date(a.churn_date).getTime() : 0;
@@ -111,20 +131,40 @@ export default function Churn() {
       })
       .slice(0, 10);
 
-    const currChurnRate = metrics[metrics.length - 1]?.churn_rate || 0;
-    const lostRev = cancelled.reduce((acc, c) => acc + (c.mrr || 0), 0);
+    const currChurnRate = current.churnRate || 0;
+
+    // Calculate Revenue Churn for the Selected Month
+    // Revenue Churn = (MRR Lost in Month) / (Total MRR at Start of Month)
+    const startOfSelectedMonth = startOfMonth(selectedMonth);
+
+    const churnedInMonth = clients.filter(c =>
+      c.churn_date && isSameMonth(parseISO(c.churn_date), selectedMonth)
+    );
+    const lostRev = churnedInMonth.reduce((acc, c) => acc + (c.mrr || 0), 0);
+
+    // Total MRR at start: Active clients at start of month
+    // Active if created before start and (churned after start or never)
+    const activeAtStart = clients.filter(c => {
+      const startDate = c.start_date ? new Date(c.start_date) : new Date(c.created_at);
+      const churnDate = c.churn_date ? new Date(c.churn_date) : null;
+      return startDate < startOfSelectedMonth && (!churnDate || churnDate >= startOfSelectedMonth);
+    });
+    const startMrr = activeAtStart.reduce((acc, c) => acc + (c.mrr || 0), 0);
+
+    const revChurnRate = startMrr > 0 ? (lostRev / startMrr) * 100 : 0;
 
     return {
       churnEvolutionData: evolutionData,
       atRiskClients: atRisk,
       cancellations: cancelled,
       currentChurnRate: currChurnRate,
-      churnedRevenue: lostRev
+      churnedRevenue: lostRev,
+      revenueChurnRate: revChurnRate
     };
-  }, [metrics, clients]);
+  }, [history, clients, current, selectedMonth]);
 
 
-  if (isLoadingMetrics || isLoadingClients) {
+  if (isLoadingData || isLoadingSnapshot || !current) {
     return (
       <AppLayout title="Churn & Retenção" subtitle="Análise de cancelamentos e retenção de clientes">
         <div className="flex h-[400px] items-center justify-center">
@@ -143,30 +183,32 @@ export default function Churn() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Churn Rate (Clientes)"
-          value={`${currentChurnRate}%`}
+          value={`${currentChurnRate.toFixed(1)}%`}
           change={0}
-          icon={Activity}
-          description={`${cancellations.length} cancelamentos`}
+          icon={<Activity className="h-6 w-6" />}
+          description="Mensal"
+          variant={currentChurnRate > 5 ? "danger" : "default"}
         />
         <MetricCard
           title="Churn Rate (Receita)"
-          value={`${(currentChurnRate * 1.1).toFixed(1)}%`}
+          value={`${revenueChurnRate.toFixed(1)}%`}
           change={0}
-          icon={TrendingDown}
-          description={`${formatCurrency(churnedRevenue)} perdidos`}
+          icon={<TrendingDown className="h-6 w-6" />}
+          description={`${formatCurrency(churnedRevenue)} perdidos este mês`}
+          variant={revenueChurnRate > 5 ? "danger" : "default"}
         />
         <MetricCard
           title="NRR (Net Revenue Retention)"
           value="N/A"
           change={0}
-          icon={RefreshCw}
+          icon={<RefreshCw className="h-6 w-6" />}
           description="Dados insuficientes"
         />
         <MetricCard
           title="GRR (Gross Revenue Retention)"
           value="N/A"
           change={0}
-          icon={Shield}
+          icon={<Shield className="h-6 w-6" />}
           description="Dados insuficientes"
         />
       </div>
@@ -214,7 +256,7 @@ export default function Churn() {
         {/* Churn Evolution Chart */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Evolução do Churn</CardTitle>
+            <CardTitle className="text-lg">Evolução do Churn (Últimos 12 Meses)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
@@ -249,14 +291,6 @@ export default function Churn() {
                       name="Churn Clientes"
                       stroke="hsl(var(--destructive))"
                       fill="url(#churnGradient)"
-                      strokeWidth={2}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="revenueChurn"
-                      name="Churn Receita"
-                      stroke="hsl(var(--warning))"
-                      fill="url(#revenueChurnGradient)"
                       strokeWidth={2}
                     />
                   </AreaChart>

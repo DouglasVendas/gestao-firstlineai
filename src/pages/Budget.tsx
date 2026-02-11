@@ -3,7 +3,7 @@ import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Download, Plus, Target, TrendingUp, AlertCircle, Loader2, Wallet } from "lucide-react";
+import { Download, Target, TrendingUp, AlertCircle, Loader2, Wallet } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -14,8 +14,8 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { useFixedCosts } from "@/hooks/useFixedCosts";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useFinancialData } from "@/contexts/FinancialContext";
+import { useFinancialSnapshot } from "@/hooks/useFinancialMetrics";
 import { CreateBudgetModal } from "@/components/modals/CreateBudgetModal";
 
 const formatCurrency = (value: number) => {
@@ -44,10 +44,10 @@ const okrs = [
 ];
 
 export default function Budget() {
-  const { data: fixedCosts, isLoading: isLoadingCosts } = useFixedCosts();
-  const { data: metrics, isLoading: isLoadingMetrics } = useDashboardData();
+  const { fixedCosts, isLoading: isLoadingCosts } = useFinancialData();
+  const { current, isLoading: isLoadingMetrics } = useFinancialSnapshot();
 
-  if (isLoadingCosts || isLoadingMetrics) {
+  if (isLoadingCosts || isLoadingMetrics || !current) {
     return (
       <AppLayout title="Orçamento" subtitle="Gestão de metas e budget anual">
         <div className="flex h-[400px] items-center justify-center">
@@ -57,24 +57,53 @@ export default function Budget() {
     );
   }
 
-  // Calculate generic revenue stats from metrics
-  const currentMonthMetrics = metrics?.[metrics.length - 1];
+  // Calculate generic revenue stats from current snapshot
   const revenueBudgeted = 350000; // This would typically come from a budget goals table
-  const revenueActual = currentMonthMetrics?.revenue || 0;
+  const revenueActual = current.revenue || 0;
 
-  // Aggregate costs
-  const totalBudgetedCosts = fixedCosts?.reduce((acc, cost) => acc + cost.budgeted, 0) || 0;
-  const totalActualCosts = fixedCosts?.reduce((acc, cost) => acc + cost.actual, 0) || 0;
+  // Aggregate costs - Filter by selected month? 
+  // Budget usually compares Annual or Monthly. 
+  // Let's assume the view is Monthly for now to match other pages.
+  // Note: fixedCosts from context are ALL fixed costs. We should filter by month ideally or assumes they are templates.
+  // In Dre.tsx we filtered by month. Let's do same here for consistency.
+  // If `fixedCosts` in context are just the list of cost items (that recur), we sum them up.
+  // But wait, in Dre.tsx we did `fixedCosts.filter(c => c.month === selectedMonthStr)`.
+  // So they are monthly instances. We should filter.
+  // But wait, here we don't have `selectedMonth` easily accessible unless we grab it from context.
+
+  // Actually we need selectedMonth from context to filter costs correctly.
+
+  // Ideally, totalActualCosts should match what we see in DRE for Fixed Costs.
+  // Does current.totalExpenses include fixed costs? Yes.
+  // But we want to break it down.
+  // Let's just use current.totalExpenses for simplicity?
+  // No, the chart breaks down by category.
+
+  // Let's assume we want to show the breakdown of the CURRENT month's budget.
+  // We need to import selectedMonth from context.
+
+  const { selectedMonth } = useFinancialData(); // get selectedMonth
+
+  // Filter costs for current month (naive implementation assuming standard date format in db)
+  // Or we can rely on what useFinancialSnapshot calculated? No, that returns totals.
+
+  // Let's rely on the fact that fixedCosts in DB has a 'month' column as seen in Dre.tsx
+  const currentMonthStr = selectedMonth.toISOString().slice(0, 7); // YYYY-MM
+
+  const currentFixedCosts = fixedCosts.filter(c => c.month && c.month.startsWith(currentMonthStr));
+
+  const totalBudgetedCosts = currentFixedCosts.reduce((acc, cost) => acc + (cost.budgeted || 0), 0) || 0;
+  const totalActualCosts = currentFixedCosts.reduce((acc, cost) => acc + cost.actual, 0) || 0;
 
   const budgetData = [
     { category: "Receita", budgeted: revenueBudgeted, actual: revenueActual },
     { category: "Despesas", budgeted: totalBudgetedCosts, actual: totalActualCosts },
     // Detailed categories
-    ...(fixedCosts?.map(c => ({
+    ...currentFixedCosts.map(c => ({
       category: c.category,
-      budgeted: c.budgeted,
+      budgeted: c.budgeted || 0,
       actual: c.actual
-    })) || [])
+    }))
   ];
 
   return (
@@ -98,30 +127,30 @@ export default function Budget() {
         <MetricCard
           title="Orçamento Anual"
           value={formatCurrency(revenueBudgeted * 12)}
-          change={{ value: 0, isPositive: true }}
+          change={0}
           icon={Target}
           description="Meta de Receita"
         />
         <MetricCard
-          title="Realizado (YTD)"
-          value={formatCurrency(revenueActual * 7)} // Mock YTD
-          change={{ value: 2.5, isPositive: true }}
+          title="Realizado (Mês)"
+          value={formatCurrency(revenueActual)}
+          change={0}
           icon={TrendingUp}
-          description="98% da meta"
+          description="Receita deste mês"
         />
         <MetricCard
           title="Desvio Global"
-          value="+1.2%"
-          change={{ value: 1.2, isPositive: false }}
+          value={((revenueActual - revenueBudgeted) / revenueBudgeted * 100).toFixed(1) + "%"}
+          change={0}
           icon={AlertCircle}
-          description="Acima do orçado"
+          description="vs Orçado"
         />
         <MetricCard
           title="Budget Disponível"
-          value={formatCurrency(54000)}
-          change={{ value: 0, isPositive: true }}
+          value={formatCurrency(revenueBudgeted - revenueActual)}
+          change={0}
           icon={Wallet}
-          description="Q3 2024"
+          description="Restante"
         />
       </div>
 
@@ -186,4 +215,3 @@ export default function Budget() {
     </AppLayout>
   );
 }
-

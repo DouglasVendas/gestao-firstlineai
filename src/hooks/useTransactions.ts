@@ -1,6 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
+export interface Transaction {
+    id: string;
+    description: string;
+    category: string | null;
+    amount: number;
+    type: 'income' | 'expense';
+    status: 'pending' | 'completed' | 'cancelled';
+    date: string;
+    created_at: string;
+}
+
 export const useTransactions = () => {
     return useQuery({
         queryKey: ["transactions"],
@@ -11,7 +22,7 @@ export const useTransactions = () => {
                 .order("date", { ascending: false });
 
             if (error) throw error;
-            return data;
+            return data as unknown as Transaction[];
         },
     });
 };

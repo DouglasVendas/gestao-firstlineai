@@ -1,10 +1,9 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Download, TrendingUp, TrendingDown, DollarSign, Wallet, Filter, Loader2, ArrowUpRight, ArrowDownRight, Calendar as CalendarIcon } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Wallet, Download, Loader2, Calendar as CalendarIcon } from "lucide-react";
 import {
   AreaChart,
   Area,
@@ -17,8 +16,7 @@ import {
   Bar,
   Legend,
 } from "recharts";
-import { useTransactions } from "@/hooks/useTransactions";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useFinancialData } from "@/contexts/FinancialContext"; // Unified Context
 import { cn } from "@/lib/utils";
 import { CreateTransactionModal } from "@/components/modals/CreateTransactionModal";
 import {
@@ -29,15 +27,17 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import {
-  Pagination,
-  PaginationContent,
-  PaginationEllipsis,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination";
+
+// Helper to unify data types into a "Transaction-like" structure for the list
+interface CashflowItem {
+  id: string;
+  description: string;
+  category: string;
+  amount: number;
+  type: 'entrada' | 'saida';
+  date: string;
+  status: 'completed' | 'pending';
+}
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -50,54 +50,125 @@ const formatDate = (date: string) => {
   return new Intl.DateTimeFormat("pt-BR").format(new Date(date));
 };
 
-const ITEMS_PER_PAGE = 5;
-
 export default function Cashflow() {
-  const { data: transactions, isLoading: isLoadingTransactions } = useTransactions();
-  const { data: metrics, isLoading: isLoadingMetrics } = useDashboardData();
-  const [date, setDate] = useState<Date | undefined>(new Date());
-  const [currentPage, setCurrentPage] = useState(1);
+  const { invoices, fixedCosts, variableCosts, selectedMonth, setSelectedMonth, isLoading } = useFinancialData();
 
-  // Filter transactions
-  const filteredTransactions = useMemo(() => {
-    if (!transactions) return [];
-    if (!date) return transactions;
-    return transactions.filter(t => {
-      const tDate = new Date(t.date);
-      return tDate.getMonth() === date.getMonth() && tDate.getFullYear() === date.getFullYear();
+  const selectedMonthStr = useMemo(() => format(selectedMonth, 'yyyy-MM'), [selectedMonth]);
+
+  // Unified List Calculation
+  // We construct the cashflow list from Invoices (In) and Costs (Out) to ensure consistency with Dashboard.
+  const cashflowItems = useMemo<CashflowItem[]>(() => {
+    if (isLoading) return [];
+
+    const items: CashflowItem[] = [];
+
+    // 1. Invoices (Entradas)
+    invoices.forEach(inv => {
+      // Only include if it has a paid_date? Or check due_date?
+      // "Real" cashflow usually means Paid. 
+      // User said: "entradas e saídas reais (paid_date)"
+      if (inv.status === 'paid' && inv.paid_date) {
+        // Filter by global month here or do it later? 
+        // Let's filter later to allow charts to potentially see history if we wanted, 
+        // BUT for the list we usually show the selected month.
+        items.push({
+          id: `inv-${inv.id}`,
+          description: inv.client?.name || "Cliente sem nome",
+          category: "Venda",
+          amount: inv.value,
+          type: 'entrada',
+          date: inv.paid_date,
+          status: 'completed'
+        });
+      }
     });
-  }, [transactions, date]);
 
-  // Pagination Logic
-  const totalPages = Math.ceil(filteredTransactions.length / ITEMS_PER_PAGE);
-  const paginatedTransactions = useMemo(() => {
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredTransactions.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-  }, [filteredTransactions, currentPage]);
+    // 2. Fixed Costs (Saídas)
+    fixedCosts.forEach(fc => {
+      // Assuming fixed costs apply if they correspond to the month
+      if (fc.month) {
+        items.push({
+          id: `fc-${fc.id}`,
+          description: fc.description,
+          category: fc.category,
+          amount: fc.actual,
+          type: 'saida',
+          date: `${fc.month}-01`, // Default to 1st of month if no specific day
+          status: 'completed'
+        });
+      }
+    });
 
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
-  };
+    // 3. Variable Costs (Saídas)
+    variableCosts.forEach(vc => {
+      if (vc.month) {
+        items.push({
+          id: `vc-${vc.id}`,
+          description: vc.description || vc.category,
+          category: vc.category,
+          amount: vc.amount,
+          type: 'saida',
+          date: `${vc.month}-01`,
+          status: 'completed'
+        });
+      }
+    });
 
-  // Metrics based on filtered data (or current month if filter selected, else global? usually strictly filtered)
-  const currentStats = useMemo(() => {
-    if (!filteredTransactions.length) return { revenue: 0, expenses: 0, balance: 0 };
+    // Sort by date desc
+    return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [invoices, fixedCosts, variableCosts, isLoading]);
 
-    // If date is selected, we calculate from transactions of that month
-    // If no date, we might show total or just last month. 
-    // Default is current month via state init.
+  // Filter by Selected Month
+  const currentMonthItems = useMemo(() => {
+    return cashflowItems.filter(item => item.date.startsWith(selectedMonthStr));
+  }, [cashflowItems, selectedMonthStr]);
 
-    const revenue = filteredTransactions.filter(t => t.type === 'entrada').reduce((acc, t) => acc + t.amount, 0);
-    const expenses = filteredTransactions.filter(t => t.type === 'saida').reduce((acc, t) => acc + t.amount, 0);
+  // Stats for the Cards
+  const stats = useMemo(() => {
+    const revenue = currentMonthItems.filter(i => i.type === 'entrada').reduce((acc, i) => acc + i.amount, 0);
+    const expenses = currentMonthItems.filter(i => i.type === 'saida').reduce((acc, i) => acc + i.amount, 0);
     return {
       revenue,
       expenses,
       balance: revenue - expenses
     };
-  }, [filteredTransactions]);
+  }, [currentMonthItems]);
+
+  // Chart Data (History)
+  // We can aggregate cashflowItems by month
+  // Or stick to current selection for now. 
+  // Let's build a simple 6-month history from the full cashflowItems list
+  const chartData = useMemo(() => {
+    const map = new Map<string, { month: string, entradas: number, saidas: number, saldo: number }>();
+
+    // Initialize last 6 months
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(selectedMonth);
+      d.setMonth(d.getMonth() - i);
+      const mStr = format(d, 'yyyy-MM');
+      map.set(mStr, {
+        month: format(d, 'MMM', { locale: ptBR }),
+        entradas: 0,
+        saidas: 0,
+        saldo: 0
+      });
+    }
+
+    cashflowItems.forEach(item => {
+      const mStr = item.date.substring(0, 7);
+      if (map.has(mStr)) {
+        const entry = map.get(mStr)!;
+        if (item.type === 'entrada') entry.entradas += item.amount;
+        else entry.saidas += item.amount;
+        entry.saldo = entry.entradas - entry.saidas;
+      }
+    });
+
+    return Array.from(map.values());
+  }, [cashflowItems, selectedMonth]);
 
 
-  if (isLoadingTransactions || isLoadingMetrics) {
+  if (isLoading) {
     return (
       <AppLayout title="Fluxo de Caixa" subtitle="Gestão de entradas, saídas e previsibilidade">
         <div className="flex h-[400px] items-center justify-center">
@@ -107,18 +178,6 @@ export default function Cashflow() {
     );
   }
 
-  // Transform metrics for charts (Historical)
-  // This likely comes from 'metrics' which is useDashboardData (aggregated). 
-  // If we want to filter the chart by the selected date, we usually show the year context or just highlighted. 
-  // For now leaving chart as 'Evolution' (Historical context).
-  const balanceEvolutionData = metrics?.map(m => ({
-    month: new Date(m.month).toLocaleDateString('pt-BR', { month: 'short' }),
-    saldo: m.revenue - m.expenses,
-    entradas: m.revenue,
-    saidas: m.expenses
-  })) || [];
-
-
   return (
     <AppLayout
       title="Fluxo de Caixa"
@@ -127,24 +186,25 @@ export default function Cashflow() {
       {/* Actions Bar */}
       <div className="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2">
+          {/* Global Month Selector integration */}
           <Popover>
             <PopoverTrigger asChild>
               <Button
                 variant={"outline"}
                 className={cn(
                   "w-[240px] justify-start text-left font-normal",
-                  !date && "text-muted-foreground"
+                  !selectedMonth && "text-muted-foreground"
                 )}
               >
                 <CalendarIcon className="mr-2 h-4 w-4" />
-                {date ? format(date, "MMMM yyyy", { locale: ptBR }) : <span>Selecione uma data</span>}
+                {selectedMonth ? format(selectedMonth, "MMMM yyyy", { locale: ptBR }) : <span>Selecione uma data</span>}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
               <Calendar
                 mode="single"
-                selected={date}
-                onSelect={(d) => { setDate(d); setCurrentPage(1); }}
+                selected={selectedMonth}
+                onSelect={(d) => d && setSelectedMonth(d)}
                 initialFocus
               />
             </PopoverContent>
@@ -158,35 +218,39 @@ export default function Cashflow() {
         <CreateTransactionModal />
       </div>
 
-      {/* Metric Cards - Updated to use calculated stats from filtered transactions */}
+      {/* Metric Cards */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Saldo do Período"
-          value={formatCurrency(currentStats.balance)}
-          change={0} // We'd need previous period comparison for this
+          value={formatCurrency(stats.balance)}
+          change={0}
           icon={Wallet}
-          description={date ? `Referente a ${format(date, 'MMMM', { locale: ptBR })}` : "Total"}
+          description={`Referente a ${format(selectedMonth, 'MMMM', { locale: ptBR })}`}
+          variant={stats.balance >= 0 ? "success" : "danger"}
         />
         <MetricCard
           title="Entradas"
-          value={formatCurrency(currentStats.revenue)}
+          value={formatCurrency(stats.revenue)}
           change={0}
           icon={TrendingUp}
           description="Receitas do período"
+          variant="success"
         />
         <MetricCard
           title="Saídas"
-          value={formatCurrency(currentStats.expenses)}
+          value={formatCurrency(stats.expenses)}
           change={0}
           icon={TrendingDown}
           description="Despesas do período"
+          variant="danger"
         />
         <MetricCard
           title="Previsão (30d)"
-          value={formatCurrency(currentStats.balance * 1.0)} // Just showing same for now or simple projection
+          value={formatCurrency(stats.balance)} // Placeholder
           change={0}
           icon={DollarSign}
           description="Projeção baseada no saldo"
+          variant="default"
         />
       </div>
 
@@ -194,12 +258,12 @@ export default function Cashflow() {
         {/* Balance Evolution Chart */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Evolução do Saldo</CardTitle>
+            <CardTitle className="text-lg">Evolução do Saldo (6 Meses)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={balanceEvolutionData}>
+                <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="colorSaldo" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
@@ -238,7 +302,7 @@ export default function Cashflow() {
           <CardContent>
             <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={balanceEvolutionData}>
+                <BarChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                   <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
                   <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v / 1000}k`} />
@@ -260,18 +324,18 @@ export default function Cashflow() {
         </Card>
       </div>
 
-      {/* Recent Transactions */}
+      {/* Recent Transactions List */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Transações {date && `- ${format(date, 'MMMM/yyyy', { locale: ptBR })}`}</CardTitle>
+          <CardTitle className="text-lg">Transações {selectedMonth && `- ${format(selectedMonth, 'MMMM/yyyy', { locale: ptBR })}`}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4 min-h-[400px]">
-            {paginatedTransactions.length > 0 ? (
-              paginatedTransactions.map((transaction) => (
+            {currentMonthItems.length > 0 ? (
+              currentMonthItems.map((transaction) => (
                 <div
                   key={transaction.id}
-                  className="flex items-center justify-between rounded-lg border border-border p-4"
+                  className="flex items-center justify-between rounded-lg border border-border p-4 hover:bg-muted/50 transition-colors"
                 >
                   <div className="flex items-center gap-4">
                     <div
@@ -319,41 +383,6 @@ export default function Cashflow() {
               </div>
             )}
           </div>
-
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="mt-4">
-              <Pagination>
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious
-                      onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
-                      className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                    />
-                  </PaginationItem>
-
-                  {Array.from({ length: totalPages }).map((_, i) => (
-                    <PaginationItem key={i}>
-                      <PaginationLink
-                        isActive={currentPage === i + 1}
-                        onClick={() => handlePageChange(i + 1)}
-                        className="cursor-pointer"
-                      >
-                        {i + 1}
-                      </PaginationLink>
-                    </PaginationItem>
-                  ))}
-
-                  <PaginationItem>
-                    <PaginationNext
-                      onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
-                      className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
-            </div>
-          )}
         </CardContent>
       </Card>
     </AppLayout>

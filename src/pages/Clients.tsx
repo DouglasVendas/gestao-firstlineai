@@ -26,20 +26,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Search, Filter, Download, MoreHorizontal, Edit, UserX, Trash2 } from "lucide-react";
-import { useClients, type Client } from "@/hooks/useClients";
-import { useInvoices } from "@/hooks/useInvoices";
+import { Search, Filter, Download, MoreHorizontal, Edit, UserX, Trash2, Loader2, Info } from "lucide-react";
+import { Client } from "@/hooks/useClients";
 import { useUpdateClient, useDeleteClient } from "@/hooks/useUpdateClient";
 import { ClientStatusBadge } from "@/components/clients/ClientStatusBadge";
 import { CreateClientModal } from "@/components/modals/CreateClientModal";
 import { EditClientModal } from "@/components/modals/EditClientModal";
 import { formatCurrency, formatDate } from "@/lib/formatters";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { useFinancialData } from "@/contexts/FinancialContext";
+import { startOfMonth, endOfMonth, parseISO, isWithinInterval, isSameMonth } from "date-fns";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export default function Clients() {
-  const { data: clients, isLoading } = useClients();
-  const { data: invoices } = useInvoices();
+  const { clients, invoices, selectedMonth, isLoading } = useFinancialData();
   const updateClient = useUpdateClient();
   const deleteClient = useDeleteClient();
   const { toast } = useToast();
@@ -49,42 +49,81 @@ export default function Clients() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
 
+  const monthStart = startOfMonth(selectedMonth);
+  const monthEnd = endOfMonth(selectedMonth);
+
   const filteredClients = useMemo(() => {
     if (!clients) return [];
 
     const computed = clients.map(client => {
-      let derived = client.status;
-      // If client is active, check for overdue invoices
-      if (derived === 'active' && invoices) {
-        const hasOverdue = invoices.some(inv =>
-          inv.client_id === client.id &&
-          (inv.status === 'overdue' || (inv.status === 'pending' && new Date(inv.due_date) < new Date()))
-        );
-        if (hasOverdue) derived = 'overdue';
+      // Logic matching useFinancialMetrics
+      const startDate = client.start_date ? parseISO(client.start_date) : parseISO(client.created_at);
+      const churnDate = client.churn_date ? parseISO(client.churn_date) : null;
+
+      let calculatedStatus = client.status;
+
+      // Determine status based on selectedMonth
+      if (startDate > monthEnd) {
+        calculatedStatus = 'future'; // Not started yet in this context
+      } else if (churnDate && churnDate < monthStart) {
+        calculatedStatus = 'churned_past'; // Previously churned
+      } else if (churnDate && churnDate <= monthEnd) {
+        calculatedStatus = 'churned'; // Churned in this month (or on first day)
+      } else {
+        // Active in this month context.
+        // Now check for 'overdue' if active
+        // TODO: Check overdue invoices relative to selectedMonth? 
+        // Or just current overdue status? Usually overdue is a current state.
+        // If we are looking at specific month, seeing "Overdue" might be confusing if they paid later.
+        // For historical accuracy, we should check if they had overdue invoices AT THAT TIME. 
+        // But that's complex. Let's stick to "Active" for historical view, or specific status if known.
+        // For now, let's keep 'active' if they basically existed and didn't churn.
+        calculatedStatus = 'active';
+
+        // Check 'trial'
+        if (client.status === 'trial') {
+          // If trial end date < monthStart, maybe they converted?
+          // This depends on how trial status is stored (if historical).
+          // Assuming 'trial' status in DB is current.
+          // For historical, if they changed to active, we might not know when.
+          // Let's rely on DB status if it matches the timeframe, otherwise 'active'.
+          if (client.status === 'trial') calculatedStatus = 'trial';
+        }
       }
-      return { ...client, status: derived };
+
+      return { ...client, calculatedStatus };
     });
 
     return computed.filter((client) => {
       const matchesSearch = client.name.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesStatus = statusFilter === "all" || client.status === statusFilter;
+
+      let matchesStatus = true;
+      if (statusFilter === "all") matchesStatus = true;
+      else if (statusFilter === "active") matchesStatus = client.calculatedStatus === "active" || client.calculatedStatus === "trial";
+      else if (statusFilter === "churned") matchesStatus = client.calculatedStatus === "churned" || client.calculatedStatus === "churned_past";
+      else matchesStatus = client.calculatedStatus === statusFilter;
+
+      // Optional: hide 'future' clients or 'churned_past' if generic view?
+      // If "All", show everything? Maybe hide future.
+      if (client.calculatedStatus === 'future') matchesStatus = false;
+
       return matchesSearch && matchesStatus;
     });
-  }, [clients, invoices, searchTerm, statusFilter]);
+  }, [clients, invoices, searchTerm, statusFilter, selectedMonth]);
 
-  const { activeClients, trialClients, churnedClients } = useMemo(() => {
-    if (!clients) return { activeClients: 0, trialClients: 0, churnedClients: 0 };
-    return {
-      activeClients: clients.filter((c) => c.status === "active").length,
-      trialClients: clients.filter((c) => c.status === "trial").length,
-      churnedClients: clients.filter((c) => c.status === "churned").length,
-    };
-  }, [clients]);
+  const stats = useMemo(() => {
+    const active = filteredClients.filter(c => c.calculatedStatus === 'active').length;
+    const trial = filteredClients.filter(c => c.calculatedStatus === 'trial').length;
+    const churned = filteredClients.filter(c => c.calculatedStatus === 'churned').length;
+    // Note: churned here is "Churned IN this month" if we filter properly, or total churned depending on list content.
+    // Dashboard shows "Active Clients" (Count).
+    return { active, trial, churned };
+  }, [filteredClients]);
 
   const handleExport = () => {
-    if (!clients) return;
-    const header = ["Nome", "Email", "Status", "MRR", "Inicio"];
-    const rows = clients.map((c) => [c.name, c.email || '', c.status, c.mrr, c.start_date || '']);
+    if (!filteredClients) return;
+    const header = ["Nome", "Email", "Status (Mês)", "MRR", "Inicio"];
+    const rows = filteredClients.map((c) => [c.name, c.email || '', c.calculatedStatus, c.mrr, c.start_date || '']);
     const csvContent =
       "data:text/csv;charset=utf-8," +
       [header.join(","), ...rows.map((e) => e.join(","))].join("\n");
@@ -121,20 +160,8 @@ export default function Clients() {
   if (isLoading) {
     return (
       <AppLayout title="Clientes" subtitle="Gestão de clientes e contratos">
-        <div className="space-y-4">
-          <div className="flex justify-between">
-            <Skeleton className="h-10 w-64" />
-            <div className="flex gap-2">
-              <Skeleton className="h-10 w-24" />
-              <Skeleton className="h-10 w-32" />
-            </div>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-24 w-full" />
-            ))}
-          </div>
-          <Skeleton className="h-[400px] w-full" />
+        <div className="flex h-[400px] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       </AppLayout>
     );
@@ -182,19 +209,19 @@ export default function Clients() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Total de Clientes</p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-foreground">{clients?.length || 0}</p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-foreground">{filteredClients.length}</p>
         </div>
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Clientes Ativos</p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-success">{activeClients}</p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-success">{stats.active}</p>
         </div>
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Em Trial</p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-warning">{trialClients}</p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-warning">{stats.trial}</p>
         </div>
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Churned (Total)</p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-destructive">{churnedClients}</p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-destructive">{stats.churned}</p>
         </div>
       </div>
 
@@ -208,7 +235,7 @@ export default function Clients() {
                   <th>Cliente</th>
                   <th>Plano</th>
                   <th>MRR</th>
-                  <th>Status</th>
+                  <th>Status (Calculado)</th>
                   <th>Início</th>
                   <th></th>
                 </tr>
@@ -220,7 +247,7 @@ export default function Clients() {
                     <td>{client.plan?.name || "-"}</td>
                     <td className="font-mono">{formatCurrency(client.mrr)}</td>
                     <td>
-                      <ClientStatusBadge status={client.status} />
+                      <ClientStatusBadge status={client.calculatedStatus || client.status} />
                     </td>
                     <td className="font-mono text-muted-foreground">
                       {client.start_date ? formatDate(client.start_date) : "-"}

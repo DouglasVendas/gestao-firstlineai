@@ -3,7 +3,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { VariableCostsTable } from "@/components/costs/VariableCostsTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingDown, Percent, Users, AlertTriangle } from "lucide-react";
+import { TrendingDown, Percent, Users, AlertTriangle, Loader2 } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -11,43 +11,46 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { useVariableCosts } from "@/hooks/useVariableCosts";
+import { useFinancialData } from "@/contexts/FinancialContext";
 import { formatCurrency } from "@/lib/formatters";
-import { Skeleton } from "@/components/ui/skeleton";
 import { CreateVariableCostModal } from "@/components/modals/CreateVariableCostModal";
+import { isSameMonth, parseISO } from "date-fns";
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
 
 export default function VariableCosts() {
-  const { data: costs, isLoading } = useVariableCosts();
+  const { variableCosts, selectedMonth, isLoading } = useFinancialData();
+
+  const filteredCosts = useMemo(() => {
+    if (!variableCosts) return [];
+    return variableCosts.filter(c => c.month && isSameMonth(parseISO(c.month), selectedMonth));
+  }, [variableCosts, selectedMonth]);
 
   const { totalVariableCosts, categoryData } = useMemo(() => {
-    if (!costs) return { totalVariableCosts: 0, categoryData: [] };
+    if (!filteredCosts.length) return { totalVariableCosts: 0, categoryData: [] };
 
-    const total = costs.reduce((acc, c) => acc + c.amount, 0);
-    const catData = costs.map((c, index) => ({
-      name: c.category,
-      value: c.amount,
+    const total = filteredCosts.reduce((acc, c) => acc + Number(c.amount), 0);
+
+    const categoryMap = new Map<string, number>();
+    filteredCosts.forEach(c => {
+      const current = categoryMap.get(c.category) || 0;
+      categoryMap.set(c.category, current + Number(c.amount));
+    });
+
+    const catData = Array.from(categoryMap.entries()).map(([name, value], index) => ({
+      name,
+      value,
       color: COLORS[index % COLORS.length]
     }));
 
     return { totalVariableCosts: total, categoryData: catData };
-  }, [costs]);
+  }, [filteredCosts]);
 
   if (isLoading) {
     return (
       <AppLayout title="Custos Variáveis" subtitle="Gestão de custos proporcionais ao uso e consumo">
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-32 w-full" />
-            ))}
-          </div>
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Skeleton className="h-[300px] w-full lg:col-span-2" />
-            <Skeleton className="h-[300px] w-full" />
-          </div>
-          <Skeleton className="h-[200px] w-full" />
+        <div className="flex h-[400px] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       </AppLayout>
     );
@@ -68,41 +71,46 @@ export default function VariableCosts() {
           title="Total Custos Variáveis"
           value={formatCurrency(totalVariableCosts)}
           change={0}
-          icon={TrendingDown}
+          icon={<TrendingDown className="h-6 w-6" />}
           description="Este mês"
+          variant="default" // or specific color
         />
         <MetricCard
           title="Margem de Contribuição"
           value="N/A"
           change={0}
-          icon={Percent}
+          icon={<Percent className="h-6 w-6" />}
           description="Dados insuficientes"
+          variant="default"
         />
         <MetricCard
           title="Custo Médio por Cliente"
           value="N/A"
           change={0}
-          icon={Users}
+          icon={<Users className="h-6 w-6" />}
           description="Dados insuficientes"
+          variant="default"
         />
         <MetricCard
           title="Alertas Ativos"
           value="0"
           change={0}
-          icon={AlertTriangle}
+          icon={<AlertTriangle className="h-6 w-6" />}
           description="Nenhum alerta"
+          variant="default"
         />
       </div>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-3">
-        {/* Monthly Trend - REMOVED MOCK */}
+        {/* Monthly Trend - Placeholder since we filter by single month now */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-lg">Evolução por Categoria</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex h-[300px] items-center justify-center text-muted-foreground">
-              Sem histórico de custos variáveis.
+              Selecione um intervalo maior no dashboard para ver a evolução.
+              (Visualização mensal focada no mês selecionado)
             </div>
           </CardContent>
         </Card>
@@ -141,7 +149,7 @@ export default function VariableCosts() {
                 </ResponsiveContainer>
               ) : (
                 <div className="flex h-full items-center justify-center text-muted-foreground">
-                  Sem dados.
+                  Sem dados para este mês.
                 </div>
               )}
             </div>
@@ -169,7 +177,7 @@ export default function VariableCosts() {
           <CardTitle className="text-lg">Detalhamento de Custos</CardTitle>
         </CardHeader>
         <CardContent>
-          <VariableCostsTable />
+          <VariableCostsTable costs={filteredCosts} />
         </CardContent>
       </Card>
     </AppLayout>

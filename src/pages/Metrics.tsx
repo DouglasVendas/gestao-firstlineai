@@ -10,6 +10,7 @@ import {
   Zap,
   Clock,
   BarChart3,
+  Loader2,
 } from "lucide-react";
 import {
   AreaChart,
@@ -23,15 +24,15 @@ import {
   Pie,
   Cell,
 } from "recharts";
-// import { useDashboardData } from "@/hooks/useDashboardData"; // Deprecated
-import { useFinancials, MonthlyFinancials } from "@/hooks/useFinancials";
-import { useClients } from "@/hooks/useClients";
+import { useFinancialData } from "@/contexts/FinancialContext";
+import { useFinancialSnapshot, useFinancialHistory } from "@/hooks/useFinancialMetrics";
 import { formatCurrency } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Metrics() {
-  const { data: financials, isLoading: isLoadingMetrics } = useFinancials();
-  const { data: clients, isLoading: isLoadingClients } = useClients();
+  const { clients, isLoading: isLoadingData } = useFinancialData();
+  const { current, isLoading: isLoadingSnapshot } = useFinancialSnapshot();
+  const history = useFinancialHistory();
 
   const {
     currentMetric,
@@ -41,8 +42,8 @@ export default function Metrics() {
     growthRate,
     mrrData
   } = useMemo(() => {
-    if (!financials || financials.length === 0) return {
-      currentMetric: { mrr: 0, arr: 0, churn_rate: 0, month: "", revenue: 0, active_clients: 0 } as MonthlyFinancials,
+    if (!history || history.length === 0 || !current) return {
+      currentMetric: null,
       netNewMrr: 0,
       arpu: 0,
       arpuChange: 0,
@@ -50,56 +51,61 @@ export default function Metrics() {
       mrrData: []
     };
 
-    const current = financials[financials.length - 1];
-    const previous = financials[financials.length - 2] || { mrr: 0, arr: 0, churn_rate: 0, revenue: 0, active_clients: 0 };
+    // Sort history by month asc
+    const sortedHistory = [...history].sort((a, b) => a.month.localeCompare(b.month));
+
+    // Find current month in history or use the last one
+    // current.month is YYYY-MM
+    const currIndex = sortedHistory.findIndex(h => h.month === current.month);
+    const curr = currIndex >= 0 ? sortedHistory[currIndex] : sortedHistory[sortedHistory.length - 1];
+    const prev = currIndex >= 1 ? sortedHistory[currIndex - 1] : (sortedHistory.length > 1 ? sortedHistory[sortedHistory.length - 2] : { mrr: 0, activeClients: 0 });
 
     // Net New MRR
-    const netNew = current.mrr - previous.mrr;
+    const netNew = curr.mrr - prev.mrr;
 
     // ARPU
-    const currArpu = current.active_clients > 0 ? current.mrr / current.active_clients : 0;
-    const prevArpu = previous.active_clients > 0 ? previous.mrr / previous.active_clients : 0;
+    const currArpu = curr.activeClients > 0 ? curr.mrr / curr.activeClients : 0;
+    const prevArpu = prev.activeClients > 0 ? prev.mrr / prev.activeClients : 0;
     const arpuChg = prevArpu > 0 ? ((currArpu - prevArpu) / prevArpu) * 100 : 0;
 
     // Growth Rate (MRR)
-    const growth = previous.mrr > 0 ? ((current.mrr - previous.mrr) / previous.mrr) * 100 : 0;
+    const growth = prev.mrr > 0 ? ((curr.mrr - prev.mrr) / prev.mrr) * 100 : 0;
 
     // MRR Data for Chart
-    const chartData = financials.map((m, i) => {
-      const prev = financials[i - 1] || { mrr: 0 };
-      const diff = m.mrr - prev.mrr;
-      // Without real breakdown, we simplify:
-      // Positive diff -> New
-      // Negative diff -> Churn
+    const chartData = sortedHistory.map((m, i) => {
+      const p = sortedHistory[i - 1] || { mrr: 0 };
+      const diff = m.mrr - p.mrr;
       return {
-        month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }),
+        month: new Date(m.month + '-02').toLocaleString('pt-BR', { month: 'short' }),
         new: diff > 0 ? diff : 0,
-        expansion: 0, // No expansion data in current schema
-        contraction: 0, // No contraction data in current schema
+        expansion: 0,
+        contraction: 0,
         churn: diff < 0 ? Math.abs(diff) : 0
       };
     });
 
     return {
-      currentMetric: current,
+      currentMetric: curr,
       netNewMrr: netNew,
       arpu: currArpu,
       arpuChange: arpuChg,
       growthRate: growth,
       mrrData: chartData
     };
-  }, [financials]);
+  }, [history, current]);
 
   const planDistribution = useMemo(() => {
     if (!clients) return [];
 
     const stats = clients.reduce((acc, client) => {
+      if (client.status === 'churned') return acc;
+
       const planName = client.plan?.name || "Outros";
       acc[planName] = (acc[planName] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
-    const total = clients.length || 1;
+    const total = Object.values(stats).reduce((a, b) => a + b, 0) || 1;
     return Object.entries(stats).map(([name, count], index) => ({
       name,
       value: Math.round((count / total) * 100),
@@ -107,73 +113,26 @@ export default function Metrics() {
     }));
   }, [clients]);
 
-  // Calculate advanced metrics
-  const { cac, ltv, ltvCacRatio, paybackPeriod, churnRevenue } = useMemo(() => {
-    if (!financials || financials.length === 0) return { cac: 0, ltv: 0, ltvCacRatio: 0, paybackPeriod: 0, churnRevenue: 0 };
+  // Advanced metrics from Current Snapshot
+  const cac = current?.cac || 0;
+  const ltv = current?.ltv || 0;
+  const ltvCacRatio = current?.ratio || 0;
+  const paybackPeriod = current?.paybackTerm || 0;
 
-    const current = financials[financials.length - 1];
-    // Use a moving average or just current month for simplicity in this MVP
-    // In a real app, we'd query the 'marketing_stats' table or similar for specific spend/new_customers columns if they existed.
-    // For now, let's derive from what we have.
-    // We distributed 'marketing_spend' logic in the script but 'financial_metrics' table schema doesn't have it (based on my previous check/assumption).
-    // However, we did insert into 'marketing_stats'. We aren't fetching 'marketing_stats' here yet.
-    // Let's rely on standard SaaS formulas using available data or safe fallbacks.
+  const churnRevenue = useMemo(() => {
+    if (!clients || !current) return 0;
+    const currentMonthStr = current.month; // YYYY-MM
+    return clients
+      .filter(c => c.churn_date && c.churn_date.startsWith(currentMonthStr))
+      .reduce((sum, c) => sum + (c.mrr || 0), 0);
+  }, [clients, current]);
 
-    // Placeholder logic until we fetch marketing_stats:
-    // Assume CAC is roughly reasonable if we don't have exact spend data in this hook.
-    // Wait, I can't invent data. I should fetch marketing stats if I want real CAC.
-    // BUT, the user wants "Trust". If I don't have the data, "N/A" is honest.
-    // The distribution script DOES calculate CAC but didn't save it to `financial_metrics` because limits.
-    // It saved 'customers' to marketing_stats.
-    // Let's calculate simple proxies or keep N/A if strictly no data?
-    // Actually, I can estimate Churn Revenue = Churn Rate * MRR (approx).
 
-    const cChurnRate = current.churn_rate || 0;
-    const cMrr = current.mrr || 0;
-    const cChurnRev = (cChurnRate / 100) * cMrr;
-
-    // LTV = ARPU / Churn Rate
-    const cArpu = current.active_clients > 0 ? cMrr / current.active_clients : 0;
-    const cLtv = cChurnRate > 0 ? cArpu / (cChurnRate / 100) : cArpu * 24; // 2 year cap if 0 churn
-
-    // CAC is now calculated in useFinancials
-    const cCac = current.cac || 0;
-
-    // LTV:CAC Ratio
-    const cLtvCac = cCac > 0 ? cLtv / cCac : 0;
-
-    // Payback Period = CAC / (ARPU * Gross Margin %)
-    // Gross Margin approx = (Revenue - Variable Costs) / Revenue
-    // Let's approximate Margin as 80% for SaaS if no explicit data, or calculate?
-    // We have expenses in `current.expenses`.
-    // Margin = (Mrr - Expenses) / Mrr ?? No, Expenses include fixed.
-    // Gross Margin should be just (Revenue - COGS). Variable costs often proxy COGS in simple SaaS dbs.
-    // Let's use 80% standard or 100% if costs are low to avoid complex query here.
-    const grossMargin = 0.85;
-    const cPayback = (cArpu * grossMargin) > 0 ? cCac / (cArpu * grossMargin) : 0;
-
-    return {
-      cac: cCac,
-      ltv: cLtv,
-      ltvCacRatio: cLtvCac,
-      paybackPeriod: cPayback,
-      churnRevenue: cChurnRev
-    };
-  }, [financials]);
-
-  if (isLoadingMetrics || isLoadingClients) {
+  if (isLoadingData || isLoadingSnapshot || !currentMetric) {
     return (
       <AppLayout title="Métricas SaaS" subtitle="Todas as métricas importantes para seu negócio">
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-32 w-full" />
-            ))}
-          </div>
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Skeleton className="h-[300px] w-full lg:col-span-2" />
-            <Skeleton className="h-[300px] w-full" />
-          </div>
+        <div className="flex h-[400px] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       </AppLayout>
     );
@@ -195,7 +154,7 @@ export default function Metrics() {
             value={formatCurrency(currentMetric.mrr)}
             change={growthRate}
             icon={<DollarSign className="h-6 w-6" />}
-            variant="primary"
+            variant="default"
           />
           <MetricCard
             title="ARR"
@@ -209,12 +168,12 @@ export default function Metrics() {
             value={formatCurrency(arpu)}
             change={arpuChange}
             icon={<Users className="h-6 w-6" />}
-            variant="primary"
+            variant="default"
           />
           <MetricCard
             title="Net New MRR"
             value={formatCurrency(netNewMrr)}
-            change={growthRate} // Correlated
+            change={growthRate}
             icon={<TrendingUp className="h-6 w-6" />}
             variant="success"
           />
@@ -286,7 +245,7 @@ export default function Metrics() {
 
         <div className="metric-card">
           <h3 className="mb-4 text-lg font-semibold text-foreground">
-            Distribuição por Plano
+            Distribuição por Plano (Ativos)
           </h3>
           <div className="h-[200px]">
             {planDistribution.length > 0 ? (
@@ -317,7 +276,7 @@ export default function Metrics() {
               </ResponsiveContainer>
             ) : (
               <div className="flex h-full items-center justify-center text-muted-foreground">
-                Sem clientes.
+                Sem clientes ativos.
               </div>
             )}
           </div>
@@ -361,7 +320,7 @@ export default function Metrics() {
             change={0}
             changeLabel="ideal > 4"
             icon={<Zap className="h-6 w-6" />}
-            variant="success"
+            variant="default" // No data
           />
           <MetricCard
             title="Magic Number"
@@ -369,7 +328,7 @@ export default function Metrics() {
             change={0}
             changeLabel="ideal > 0.75"
             icon={<Target className="h-6 w-6" />}
-            variant="success"
+            variant="default"
           />
           <MetricCard
             title="Rule of 40"
@@ -377,7 +336,7 @@ export default function Metrics() {
             change={0}
             changeLabel="ideal > 40%"
             icon={<BarChart3 className="h-6 w-6" />}
-            variant="success"
+            variant="default"
           />
         </div>
       </section>
@@ -390,31 +349,32 @@ export default function Metrics() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             title="Churn Rate (Clientes)"
-            value={`${currentMetric.churn_rate || 0}%`}
+            value={`${currentMetric.churnRate?.toFixed(1) || 0}%`}
             change={0}
             icon={<TrendingDown className="h-6 w-6" />}
-            variant="success"
+            variant={currentMetric.churnRate > 5 ? "danger" : "default"}
           />
           <MetricCard
             title="Churn Rate (Receita)"
             value={formatCurrency(churnRevenue)}
             change={0}
             icon={<DollarSign className="h-6 w-6" />}
-            variant="success"
+            description="Perdido este mês"
+            variant="default"
           />
           <MetricCard
             title="Net Revenue Retention"
             value="N/A"
             change={0}
             icon={<TrendingUp className="h-6 w-6" />}
-            variant="success"
+            variant="default"
           />
           <MetricCard
             title="Gross Revenue Retention"
             value="N/A"
             change={0}
             icon={<BarChart3 className="h-6 w-6" />}
-            variant="primary"
+            variant="default" // No data
           />
         </div>
       </section>
@@ -430,14 +390,14 @@ export default function Metrics() {
             value={formatCurrency(ltv)}
             change={0}
             icon={<DollarSign className="h-6 w-6" />}
-            variant="primary"
+            variant="default"
           />
           <MetricCard
             title="CAC"
             value={formatCurrency(cac)}
             change={0}
             icon={<Target className="h-6 w-6" />}
-            variant="success"
+            variant="default"
           />
           <MetricCard
             title="LTV:CAC Ratio"
@@ -445,7 +405,7 @@ export default function Metrics() {
             change={0}
             changeLabel="ideal > 3x"
             icon={<BarChart3 className="h-6 w-6" />}
-            variant="success"
+            variant={ltvCacRatio >= 3 ? "success" : "warning"}
           />
           <MetricCard
             title="CAC Payback"
@@ -453,7 +413,7 @@ export default function Metrics() {
             change={0}
             changeLabel="ideal < 12 meses"
             icon={<Clock className="h-6 w-6" />}
-            variant="success"
+            variant={paybackPeriod <= 12 ? "success" : "warning"}
           />
         </div>
       </section>

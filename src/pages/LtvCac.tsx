@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { TrendingUp, DollarSign, Clock, Target, Calculator } from "lucide-react";
+import { TrendingUp, DollarSign, Clock, Target, Calculator, Loader2 } from "lucide-react";
 import {
   LineChart,
   Line,
@@ -20,17 +20,15 @@ import {
   Cell,
 } from "recharts";
 import { formatCurrency } from "@/lib/formatters";
-import { useDashboardData } from "@/hooks/useDashboardData";
-import { useClients } from "@/hooks/useClients";
-import { useFixedCosts } from "@/hooks/useFixedCosts";
-import { useVariableCosts } from "@/hooks/useVariableCosts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useFinancialSnapshot, useFinancialHistory } from "@/hooks/useFinancialMetrics";
+import { useFinancialData } from "@/contexts/FinancialContext";
+import { isSameMonth, parseISO } from "date-fns";
 
 export default function LtvCac() {
-  const { data: metrics, isLoading: isLoadingMetrics } = useDashboardData();
-  const { data: clients, isLoading: isLoadingClients } = useClients();
-  const { data: fixedCosts, isLoading: isLoadingFixed } = useFixedCosts();
-  const { data: variableCosts, isLoading: isLoadingVariable } = useVariableCosts();
+  const { clients, fixedCosts, variableCosts, selectedMonth, isLoading: isLoadingData } = useFinancialData();
+  const { current, isLoading: isLoadingSnapshot } = useFinancialSnapshot();
+  const history = useFinancialHistory();
 
   const [simulatorValues, setSimulatorValues] = useState({
     churnReduction: 0,
@@ -38,111 +36,63 @@ export default function LtvCac() {
     cacReduction: 0,
   });
 
-  const { ltvCacTrendData, currentMetric, cacComponents, cacByChannel } = useMemo(() => {
-    if (!metrics || metrics.length === 0 || !clients) return {
-      ltvCacTrendData: [],
-      currentMetric: { ltv: 0, cac: 0, ratio: 0, payback: 0 },
-      cacComponents: [],
-      cacByChannel: []
-    };
-
-    // Helper to get formatted month key (e.g. "2024-01")
-    const getMonthKey = (dateStr: string) => dateStr.substring(0, 7);
-    const getEndOfMonth = (monthStr: string) => {
-      const [year, month] = monthStr.split('-').map(Number);
-      return new Date(year, month, 0); // Last day of that month
-    }
-
-    // 1. Calculate Costs per Month (Marketing + Sales)
-    const costsByMonth: Record<string, number> = {};
-
-    fixedCosts?.forEach(cost => {
-      if (!cost.month) return;
-      const month = getMonthKey(cost.month);
-      if (['Marketing', 'Vendas', 'Comercial', 'Publicidade'].some(c => cost.category.includes(c))) {
-        costsByMonth[month] = (costsByMonth[month] || 0) + cost.actual;
-      }
-    });
-
-    variableCosts?.forEach(cost => {
-      const month = getMonthKey(cost.month);
-      if (['Anúncios', 'Comissão', 'Marketing', 'Ads'].some(c => cost.category.includes(c))) {
-        costsByMonth[month] = (costsByMonth[month] || 0) + cost.amount;
-      }
-    });
-
-    // 2. Calculate New & Active Customers per Month
-    const newCustomersByMonth: Record<string, number> = {};
-    const activeCustomersByMonth: Record<string, number> = {};
-
-    // For active customers, we need to iterate months in metrics and count
-    // Pre-process clients:
-    const clientperiods = clients.map(c => ({
-      start: c.start_date ? new Date(c.start_date) : new Date(c.created_at),
-      end: c.churn_date ? new Date(c.churn_date) : null
+  const ltvCacTrendData = useMemo(() => {
+    if (!history.length) return [];
+    return history.map(h => ({
+      month: new Date(h.month + '-01').toLocaleString('pt-BR', { month: 'short' }),
+      ltv: Math.round(h.ltv),
+      cac: Math.round(h.cac),
+      ratio: h.cac > 0 ? Number((h.ltv / h.cac).toFixed(2)) : 0
     }));
+  }, [history]);
 
-    metrics.forEach(m => {
-      const monthKey = m.month.substring(0, 7);
-      const monthEnd = getEndOfMonth(monthKey);
+  // CAC Components for the current selected month
+  const cacComponents = useMemo(() => {
+    if (!fixedCosts || !variableCosts) return [];
 
-      // Count active
-      let active = 0;
-      clientperiods.forEach(p => {
-        if (p.start <= monthEnd && (!p.end || p.end > monthEnd)) {
-          active++;
-        }
-      });
-      activeCustomersByMonth[monthKey] = active;
-    });
-
-    clients.forEach(client => {
-      const date = new Date(client.created_at);
-      const month = date.toISOString().substring(0, 7);
-      newCustomersByMonth[month] = (newCustomersByMonth[month] || 0) + 1;
-    });
-
-    // 3. Build Trend Data
-    const trends = metrics.map(m => {
-      const monthKey = m.month.substring(0, 7);
-      const customers = activeCustomersByMonth[monthKey] || 0;
-      const arpu = customers > 0 ? m.mrr / customers : 0;
-      const churn = m.churn_rate > 0 ? m.churn_rate / 100 : 0; // If churn is 0, LTV is infinite, handle safely
-      const ltv = churn > 0 ? arpu / churn : arpu * 24; // Fallback to 24 months cap if 0 churn
-
-      const monthlyCost = costsByMonth[monthKey] || 0;
-      const newCtx = newCustomersByMonth[monthKey] || 0;
-      const cac = newCtx > 0 ? monthlyCost / newCtx : 0;
-
-      return {
-        month: new Date(m.month + '-02').toLocaleString('default', { month: 'short' }),
-        ltv: Math.round(ltv),
-        cac: Math.round(cac),
-        ratio: cac > 0 ? Number((ltv / cac).toFixed(2)) : 0,
-        payback: cac > 0 && arpu > 0 ? cac / arpu : 0
-      };
-    });
-
-    const curr = trends[trends.length - 1] || { ltv: 0, cac: 0, ratio: 0, payback: 0 };
-
-    // Mock breakdown for visualization since we aggregated everything
-    const components = [
-      { name: 'Marketing (Fixo)', value: 0.4 * curr.cac, color: 'hsl(var(--chart-1))' },
-      { name: 'Vendas (Fixo)', value: 0.3 * curr.cac, color: 'hsl(var(--chart-2))' },
-      { name: 'Ads (Variável)', value: 0.2 * curr.cac, color: 'hsl(var(--chart-3))' },
-      { name: 'Comissões', value: 0.1 * curr.cac, color: 'hsl(var(--chart-4))' },
-    ].filter(c => c.value > 0);
-
-    return {
-      ltvCacTrendData: trends,
-      currentMetric: curr,
-      cacComponents: components,
-      cacByChannel: [] // Still no channel data in DB
+    // Identical logic to useFinancialMetrics for identifying CAC expenses
+    const isCacExpense = (category: string) => {
+      const lower = category.toLowerCase();
+      return ['marketing', 'vendas', 'comercial', 'ads', 'publicidade', 'comissão', 'facebook', 'google', 'instagram', 'linkedin'].some(k => lower.includes(k));
     };
-  }, [metrics, clients, fixedCosts, variableCosts]);
 
-  const baseLTV = currentMetric.ltv;
-  const baseCAC = currentMetric.cac;
+    const relevantFixed = fixedCosts.filter(c => {
+      // Assuming fixedCosts might have 'month' or apply generally? 
+      // For LTV/CAC page, usually we want to see the breakdown for the selected period.
+      if (c.month && !isSameMonth(parseISO(c.month), selectedMonth)) return false;
+      return isCacExpense(c.category);
+    });
+
+    const relevantVariable = variableCosts.filter(c => {
+      if (c.month && !isSameMonth(parseISO(c.month), selectedMonth)) return false;
+      return isCacExpense(c.category);
+    });
+
+    // Group by category for the Pie Chart
+    const stats: Record<string, number> = {};
+
+    relevantFixed.forEach(c => {
+      stats[c.category] = (stats[c.category] || 0) + Number(c.actual);
+    });
+    relevantVariable.forEach(c => {
+      stats[c.category] = (stats[c.category] || 0) + Number(c.amount);
+    });
+
+    const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
+
+    return Object.entries(stats)
+      .sort(([, a], [, b]) => b - a)
+      .map(([name, value], index) => ({
+        name,
+        value,
+        color: COLORS[index % COLORS.length]
+      }));
+
+  }, [fixedCosts, variableCosts, selectedMonth]);
+
+  // Simulator
+  const baseLTV = current?.ltv || 0;
+  const baseCAC = current?.cac || 0;
 
   const { simulatedLTV, simulatedCAC, simulatedRatio } = useMemo(() => {
     const sLTV = baseLTV * (1 + simulatorValues.churnReduction / 100) * (1 + simulatorValues.arpaIncrease / 100);
@@ -151,42 +101,52 @@ export default function LtvCac() {
     return { simulatedLTV: sLTV, simulatedCAC: sCAC, simulatedRatio: sRatio };
   }, [baseLTV, baseCAC, simulatorValues]);
 
+  // LTV by Plan (Current Clients)
   const ltvByPlanData = useMemo(() => {
     if (!clients) return [];
 
     const planStats = clients.reduce((acc, client) => {
+      // Basic check for status if we want to include churned or not?
+      // Usually LTV by Plan considers all history or active? 
+      // Let's iterate ALL clients to see "Average LTV" historical? 
+      // Or just projected LTV of active clients? 
+      // The previous logic was: `ltv: stats.count > 0 ? (stats.totalMrr / stats.count) * 30 : 0`
+      // It assumed 30 months retention.
+      // Let's keep a similar approximation or use the `baseLTV` factor?
+      // Better to calculate ARPU per plan and divide by global Churn Rate for consistency.
+
       const planName = client.plan?.name || "Desconhecido";
       if (!acc[planName]) {
-        acc[planName] = { totalMrr: 0, count: 0, color: "hsl(var(--primary))" };
+        acc[planName] = { totalMrr: 0, count: 0 };
       }
+      // Use current MRR if active, or last MRR?
+      // Assuming client.mrr is valid.
       acc[planName].totalMrr += client.mrr;
       acc[planName].count += 1;
       return acc;
-    }, {} as Record<string, { totalMrr: number, count: number, color: string }>);
+    }, {} as Record<string, { totalMrr: number, count: number }>);
 
-    return Object.entries(planStats).map(([plan, stats], index) => ({
-      plan,
-      ltv: stats.count > 0 ? (stats.totalMrr / stats.count) * 30 : 0, // Approx LTV assuming 30 months retention if unknown
-      clients: stats.count,
-      color: `hsl(var(--chart-${index + 1}))`
-    }));
-  }, [clients]);
+    const churnRateDecimal = current?.churnRate ? current.churnRate / 100 : 0.05; // Fallback 5% if 0
+    // Avoid division by zero
+    const effectiveChurn = churnRateDecimal === 0 ? 0.01 : churnRateDecimal;
 
-  if (isLoadingMetrics || isLoadingClients || isLoadingFixed || isLoadingVariable) {
+    return Object.entries(planStats).map(([plan, stats], index) => {
+      const arpu = stats.count > 0 ? stats.totalMrr / stats.count : 0;
+      const ltv = arpu / effectiveChurn;
+      return {
+        plan,
+        ltv,
+        clients: stats.count,
+        color: `hsl(var(--chart-${index + 1}))`
+      };
+    }).sort((a, b) => b.ltv - a.ltv);
+  }, [clients, current]);
+
+  if (isLoadingData || isLoadingSnapshot || !current) {
     return (
       <AppLayout title="LTV & CAC" subtitle="Lifetime Value e Custo de Aquisição de Clientes">
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-32 w-full" />
-            ))}
-          </div>
-          <Skeleton className="h-[300px] w-full" />
-          <div className="grid gap-6 lg:grid-cols-3">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-[250px] w-full" />
-            ))}
-          </div>
+        <div className="flex h-[400px] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       </AppLayout>
     );
@@ -203,29 +163,36 @@ export default function LtvCac() {
           title="LTV Médio"
           value={formatCurrency(baseLTV)}
           change={0}
-          icon={TrendingUp}
+          icon={<TrendingUp className="h-6 w-6" />}
           description="Por cliente"
+          variant="default"
         />
         <MetricCard
           title="CAC Médio"
           value={formatCurrency(baseCAC)}
           change={0}
-          icon={DollarSign}
+          icon={<DollarSign className="h-6 w-6" />}
           description="Por aquisição"
+          variant="default"
         />
         <MetricCard
           title="LTV:CAC Ratio"
-          value={`${currentMetric.ratio}:1`}
+          value={`${current.ratio || '0'}:1`}
           change={0}
-          icon={Target}
+          icon={<Target className="h-6 w-6" />}
           description="Meta: > 3:1"
+          variant={
+            (current.ratio || 0) >= 3 ? "success" :
+              (current.ratio || 0) >= 1 ? "warning" : "danger"
+          }
         />
         <MetricCard
           title="Payback Period"
-          value={`${currentMetric.payback.toFixed(1)} meses`}
+          value={`${current.paybackTerm ? current.paybackTerm.toFixed(1) : '0'} meses`}
           change={0}
-          icon={Clock}
+          icon={<Clock className="h-6 w-6" />}
           description="Tempo para recuperar CAC"
+          variant="default"
         />
       </div>
 
@@ -233,7 +200,7 @@ export default function LtvCac() {
         {/* LTV vs CAC Trend */}
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-lg">Evolução LTV vs CAC</CardTitle>
+            <CardTitle className="text-lg">Evolução LTV vs CAC (Últimos 12 Meses)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
@@ -290,7 +257,7 @@ export default function LtvCac() {
                       <Badge variant="secondary">{plan.clients} clientes</Badge>
                     </div>
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">LTV Médio</span>
+                      <span className="text-muted-foreground">LTV Médio (Est.)</span>
                       <span className="font-medium">{formatCurrency(plan.ltv)}</span>
                     </div>
                   </div>
@@ -311,9 +278,9 @@ export default function LtvCac() {
           </CardHeader>
           <CardContent>
             <div className="flex h-[200px] items-center justify-center text-center text-sm text-muted-foreground">
-              Dados reais de canais de aquisição ainda não implementados no banco de dados.
+              Dados reais de canais de aquisição ainda não implementados.
               <br />
-              Use a Importação de Dados para adicionar.
+              (Requer integração de atribuição)
             </div>
           </CardContent>
         </Card>
@@ -321,7 +288,7 @@ export default function LtvCac() {
         {/* CAC Components */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Componentes do CAC</CardTitle>
+            <CardTitle className="text-lg">Componentes do CAC ({selectedMonth.toLocaleDateString('pt-BR', { month: 'short' })})</CardTitle>
           </CardHeader>
           <CardContent>
             {cacComponents.length > 0 ? (
@@ -348,12 +315,12 @@ export default function LtvCac() {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="mt-2 text-center text-sm text-muted-foreground">
-                  Estimativa baseada no CAC Total
+                  Custos de Marketing e Vendas do mês
                 </div>
               </div>
             ) : (
               <div className="flex h-[200px] items-center justify-center text-center text-sm text-muted-foreground">
-                Aguardando dados de custos de marketing.
+                Sem custos de marketing/vendas neste mês.
               </div>
             )}
           </CardContent>

@@ -22,12 +22,17 @@ import {
 } from "recharts";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import { useFinancials } from "@/hooks/useFinancials";
+import { useFinancialData } from "@/contexts/FinancialContext";
+import { useFinancialSnapshot, useFinancialHistory } from "@/hooks/useFinancialMetrics";
 
 // Dynamics moved inside component
 
 export default function Valuation() {
-  const { data: financials, isLoading } = useFinancials();
+  const { invoices, selectedMonth, isLoading: isLoadingData } = useFinancialData();
+  const { current } = useFinancialSnapshot();
+  const history = useFinancialHistory();
+
+  const isLoading = isLoadingData;
   const [inputs, setInputs] = useState({
     arr: 4200000,
     growthRate: 85,
@@ -39,25 +44,11 @@ export default function Valuation() {
   });
 
   useEffect(() => {
-    if (financials && financials.length > 0) {
-      const current = financials[financials.length - 1];
-      const previous = financials[financials.length - 13] || financials[0]; // Try to get YoY or fallback to start
-
-      const arr = current.arr || (current.mrr * 12) || 0;
-      let growthRate = 0;
-      if (previous.arr > 0) {
-        growthRate = ((arr - previous.arr) / previous.arr) * 100;
-      } else if (previous.mrr > 0) {
-        growthRate = (((current.mrr || 0) - previous.mrr) / previous.mrr) * 100;
-      }
-
-      setInputs(prev => ({
-        ...prev,
-        arr: arr,
-        growthRate: Math.round(growthRate) || 0
-      }));
+    // Logic to set default inputs from current data if available
+    if (current?.arr) {
+      setInputs(prev => ({ ...prev, arr: current.arr }));
     }
-  }, [financials]);
+  }, [current]);
 
   if (isLoading) {
     return (
