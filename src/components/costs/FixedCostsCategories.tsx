@@ -121,6 +121,11 @@ export function FixedCostsCategories({ costs }: FixedCostsCategoriesProps) {
                         </div>
                       </div>
                       <div className="ml-4 flex items-center gap-4">
+                        {(item as any).status && (
+                          <Badge variant={(item as any).status === 'paid' ? "success" : "warning"} className="capitalize">
+                            {(item as any).status === 'paid' ? 'Pago' : 'Pendente'}
+                          </Badge>
+                        )}
                         <div className="text-right text-sm">
                           <span className="font-medium">{formatCurrency(item.actual)}</span>
                         </div>

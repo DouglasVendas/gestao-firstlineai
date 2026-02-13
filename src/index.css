@@ -116,6 +116,7 @@
 }
 
 @layer components {
+  /* ... previously existing components ... */
   .metric-card {
     @apply relative overflow-hidden rounded-xl border border-border bg-card p-6;
     background: var(--gradient-card);
@@ -220,6 +221,24 @@
   .chart-container {
     @apply relative h-[300px] w-full;
   }
+  
+  /* Paper Simulation for Legal Hub */
+  .a4-paper {
+    width: 210mm;
+    min-height: 297mm;
+    background: white;
+    box-shadow: 0 0 15px rgba(0,0,0,0.1);
+    margin: 0 auto;
+    padding: 20mm;
+    color: black;
+    font-size: 11pt;
+    line-height: 1.5;
+  }
+  
+  .dark .a4-paper {
+    background: #e5e5e5; /* Slightly grey for dark mode comfort, but still looks like paper */
+    color: black;
+  }
 }
 
 @layer utilities {
@@ -294,5 +313,32 @@
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+  }
+}
+
+/* Print Styles */
+@media print {
+  @page { margin: 0; size: auto; }
+  body * {
+    visibility: hidden;
+  }
+  #contract-preview, #contract-preview * {
+    visibility: visible;
+  }
+  #contract-preview {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 20mm;
+    background: white;
+    color: black;
+    box-shadow: none;
+  }
+  
+  /* Reset background colors for print */
+  .dark .a4-paper {
+      background: white;
   }
 }

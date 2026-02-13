@@ -9,16 +9,8 @@ import {
   Cell,
   ReferenceLine,
 } from "recharts";
-
-const data = [
-  { name: "MRR Inicial", value: 105000, type: "base" },
-  { name: "Novos Clientes", value: 12000, type: "positive" },
-  { name: "Expansão", value: 8000, type: "positive" },
-  { name: "Reativação", value: 2000, type: "positive" },
-  { name: "Contração", value: -3000, type: "negative" },
-  { name: "Churn", value: -5000, type: "negative" },
-  { name: "MRR Final", value: 119000, type: "total" },
-];
+import { useFinancialSnapshot } from "@/hooks/useFinancialMetrics";
+import { Loader2 } from "lucide-react";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -60,6 +52,40 @@ const CustomTooltip = ({ active, payload }: any) => {
 };
 
 export function MRRMovementChart() {
+  const { current, previous, isLoading } = useFinancialSnapshot();
+
+  if (isLoading || !current) {
+    return (
+      <div className="metric-card flex h-[350px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  // Calculate movements
+  const startMRR = previous?.mrr || 0;
+  const endMRR = current.mrr;
+  const newMRR = current.newMRR || 0;
+  const churnMRR = current.churnMRR || 0; // This should be positive value of lost revenue
+
+  // Net expansion/contraction = (End - Start) - (New - Churn)
+  // If ChurnMRR IS summed as positive number of lost MRR:
+  // End = Start + New - Churn + Expansion
+  // Expansion = End - Start - New + Churn
+  const expansionNet = endMRR - startMRR - newMRR + churnMRR;
+
+  const data = [
+    { name: "MRR Inicial", value: startMRR, type: "base" },
+    { name: "Novos Clientes", value: newMRR, type: "positive" },
+    // If expansionNet is positive, show as Expansion. If negative, show as Contraction.
+    ...(expansionNet >= 0
+      ? [{ name: "Expansão", value: expansionNet, type: "positive" }]
+      : [{ name: "Contração", value: expansionNet, type: "negative" }]
+    ),
+    { name: "Churn", value: -churnMRR, type: "negative" },
+    { name: "MRR Final", value: endMRR, type: "total" },
+  ];
+
   return (
     <div className="metric-card animate-slide-up">
       <div className="mb-6">

@@ -1,5 +1,6 @@
-import { ArrowDown, ArrowUp, Minus, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowUp, Minus, Eye, EyeOff, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useState } from "react";
 
 interface MetricCardProps {
   title: string;
@@ -9,6 +10,7 @@ interface MetricCardProps {
   description?: string;
   icon?: React.ReactNode | LucideIcon;
   variant?: "default" | "primary" | "success" | "warning" | "danger";
+  allowPrivacy?: boolean;
 }
 
 export function MetricCard({
@@ -19,7 +21,10 @@ export function MetricCard({
   description,
   icon,
   variant = "default",
+  allowPrivacy = false,
 }: MetricCardProps) {
+  const [isHidden, setIsHidden] = useState(false);
+
   // Handle both number and object formats for change
   const changeValue = typeof change === "object" ? change.value : change;
   const isPositive = typeof change === "object" ? change.isPositive : (change !== undefined && change > 0);
@@ -39,12 +44,26 @@ export function MetricCard({
   const iconNode = renderIcon();
 
   return (
-    <div className="metric-card glow-border animate-fade-in">
+    <div className="metric-card glow-border animate-fade-in relative group">
       <div className="flex items-start justify-between">
-        <div className="space-y-2">
-          <p className="metric-label">{title}</p>
-          <p className="metric-value font-mono">{value}</p>
-          
+        <div className="space-y-2 w-full">
+          <div className="flex items-center gap-2">
+            <p className="metric-label">{title}</p>
+            {allowPrivacy && (
+              <button
+                onClick={() => setIsHidden(!isHidden)}
+                className="text-muted-foreground hover:text-foreground transition-colors focus:outline-none"
+                title={isHidden ? "Mostrar valor" : "Ocultar valor"}
+              >
+                {isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              </button>
+            )}
+          </div>
+
+          <p className={cn("metric-value font-mono transition-all duration-300", isHidden && "blur-md select-none")}>
+            {value}
+          </p>
+
           {changeValue !== undefined && (
             <div className="flex items-center gap-2">
               <span
@@ -58,14 +77,14 @@ export function MetricCard({
                 {isPositive && <ArrowUp className="h-3 w-3" />}
                 {isNegative && <ArrowDown className="h-3 w-3" />}
                 {isNeutral && <Minus className="h-3 w-3" />}
-                {Math.abs(changeValue)}%
+                {Math.round(Math.abs(changeValue))}%
               </span>
               <span className="text-xs text-muted-foreground">
                 {description || changeLabel}
               </span>
             </div>
           )}
-          
+
           {description && changeValue === undefined && (
             <p className="text-xs text-muted-foreground">{description}</p>
           )}
@@ -74,7 +93,7 @@ export function MetricCard({
         {iconNode && (
           <div
             className={cn(
-              "flex h-12 w-12 items-center justify-center rounded-xl",
+              "flex h-12 w-12 items-center justify-center rounded-xl ml-4",
               variant === "default" && "bg-secondary text-muted-foreground",
               variant === "primary" && "bg-primary/10 text-primary",
               variant === "success" && "bg-success/10 text-success",

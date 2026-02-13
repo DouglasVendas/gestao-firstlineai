@@ -15,7 +15,11 @@ import {
   Calendar,
   Loader2,
 } from "lucide-react";
-import { useFinancialSnapshot } from "@/hooks/useFinancialMetrics";
+import { RenewalWidget } from "@/components/dashboard/RenewalWidget";
+import { useFinancialSnapshot, useFinancialHistory } from "@/hooks/useFinancialMetrics";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GrowthMetrics } from "@/components/dashboard/growth/GrowthMetrics";
+import { RetentionMetrics } from "@/components/dashboard/retention/RetentionMetrics";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -28,6 +32,7 @@ const formatCurrency = (value: number) => {
 
 export default function Index() {
   const { current, previous, isLoading } = useFinancialSnapshot();
+  const history = useFinancialHistory();
 
   if (isLoading || !current) {
     return (
@@ -52,73 +57,104 @@ export default function Index() {
   return (
     <AppLayout
       title="Dashboard Executivo"
-      subtitle="Visão geral das métricas financeiras e operacionais"
+      subtitle="Visão centralizada de performance (Overview, Growth e Retenção)"
     >
-      {/* Top Metrics */}
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <MetricCard
-          title="MRR"
-          value={formatCurrency(current.mrr)}
-          change={Number(mrrChange.toFixed(1))}
-          icon={<DollarSign className="h-6 w-6" />}
-          variant="primary"
-        />
-        <MetricCard
-          title="ARR"
-          value={formatCurrency(current.arr)}
-          change={Number(arrChange.toFixed(1))}
-          icon={<Calendar className="h-6 w-6" />}
-          variant="success"
-        />
-        <MetricCard
-          title="Clientes Ativos"
-          value={current.activeClients.toString()}
-          change={Number(clientsChange.toFixed(1))}
-          icon={<Users className="h-6 w-6" />}
-          variant="primary"
-        />
-        <MetricCard
-          title="Churn Rate"
-          value={`${current.churnRate.toFixed(1)}%`}
-          change={0}
-          icon={<TrendingDown className="h-6 w-6" />}
-          variant="success"
-        />
-        <MetricCard
-          title="LTV:CAC"
-          value={`${current.ltv.toFixed(1)}x`} // Using calculated LTV ratio
-          change={0}
-          icon={<Target className="h-6 w-6" />}
-          variant="success"
-        />
-        <MetricCard
-          title="Receita (Caixa)"
-          value={formatCurrency(current.revenue)}
-          change={0}
-          icon={<Wallet className="h-6 w-6" />}
-          variant="warning"
-        />
-      </div>
+      <Tabs defaultValue="overview" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-3 lg:w-[400px]">
+          <TabsTrigger value="overview">Visão Geral</TabsTrigger>
+          <TabsTrigger value="growth">Growth & Eficiência</TabsTrigger>
+          <TabsTrigger value="retention">Churn & Retenção</TabsTrigger>
+        </TabsList>
 
-      {/* Main Charts Row */}
-      <div className="mb-8 grid gap-6 lg:grid-cols-2">
-        <RevenueChart />
-        <MRRMovementChart />
-      </div>
+        {/* OVERVIEW TAB (Current Dashboard) */}
+        <TabsContent value="overview" className="space-y-6">
+          {/* Top Metrics */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricCard
+              title="MRR"
+              value={formatCurrency(current.mrr)}
+              change={Number(mrrChange.toFixed(1))}
+              icon={<DollarSign className="h-6 w-6" />}
+              variant="primary"
+            />
+            <MetricCard
+              title="ARR"
+              value={formatCurrency(current.arr)}
+              change={Number(arrChange.toFixed(1))}
+              icon={<Calendar className="h-6 w-6" />}
+              variant="success"
+            />
+            <MetricCard
+              title="Clientes Ativos"
+              value={current.activeClients.toString()}
+              change={Number(clientsChange.toFixed(1))}
+              icon={<Users className="h-6 w-6" />}
+              variant="primary"
+            />
+            <MetricCard
+              title="Churn Rate"
+              value={`${current.churnRate.toFixed(1)}%`}
+              change={0}
+              icon={<TrendingDown className="h-6 w-6" />}
+              variant="success"
+            />
+            <MetricCard
+              title="LTV:CAC"
+              value={`${current.ratio.toFixed(1)}x`}
+              change={0}
+              icon={<Target className="h-6 w-6" />}
+              variant="success"
+            />
+            <MetricCard
+              title="Receita (Caixa)"
+              value={formatCurrency(current.revenue)}
+              change={0}
+              icon={<Wallet className="h-6 w-6" />}
+              variant="warning"
+            />
+            <MetricCard
+              title="Saldo (Caixa)"
+              value={formatCurrency(current.cashBalance)}
+              change={0}
+              icon={<Wallet className="h-6 w-6" />}
+              variant="primary"
+              allowPrivacy={true}
+            />
+          </div>
 
-      {/* Secondary Charts Row */}
-      <div className="mb-8 grid gap-6 lg:grid-cols-2">
-        <ChurnChart />
-        <LTVCACChart />
-      </div>
+          {/* Main Charts Row */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <RevenueChart />
+            <MRRMovementChart />
+          </div>
 
-      {/* Bottom Row */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <ClientsTable />
-        </div>
-        <QuickStats />
-      </div>
+          {/* Secondary Charts Row */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* LTV/Churn charts kept here for quick view, or could be removed if redundant */}
+            <ChurnChart />
+            <RenewalWidget />
+          </div>
+
+          {/* Bottom Row */}
+          <div className="grid gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <ClientsTable />
+            </div>
+            <QuickStats current={current} previous={previous} />
+          </div>
+        </TabsContent>
+
+        {/* GROWTH TAB */}
+        <TabsContent value="growth">
+          <GrowthMetrics currentMetric={current} history={history} />
+        </TabsContent>
+
+        {/* RETENTION TAB */}
+        <TabsContent value="retention">
+          <RetentionMetrics currentMetric={current} history={history} />
+        </TabsContent>
+
+      </Tabs>
     </AppLayout>
   );
 }

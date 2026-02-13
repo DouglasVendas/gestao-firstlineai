@@ -8,6 +8,7 @@ import {
   TrendingUp,
   Wallet,
   Receipt,
+  Scale,
   Target,
   BarChart3,
   PieChart,
@@ -37,49 +38,31 @@ interface NavGroup {
 
 const navigation: NavGroup[] = [
   {
-    title: "Overview",
+    title: "Visão Geral",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Métricas SaaS", href: "/metrics", icon: Gauge },
     ],
   },
   {
-    title: "Clientes & Receita",
+    title: "Estratégia & Gestão",
+    items: [
+      { title: "Hub Financeiro", href: "/financial", icon: BarChart3 },
+      { title: "Gestão de Custos", href: "/costs", icon: Wallet },
+      { title: "Hub Comercial", href: "/commercial", icon: TrendingUp },
+      { title: "Hub Jurídico", href: "/legal", icon: Scale },
+    ],
+  },
+  {
+    title: "Operacional",
     items: [
       { title: "Clientes", href: "/clients", icon: Users },
-      { title: "Planos", href: "/plans", icon: CreditCard },
       { title: "Recebimentos", href: "/receivables", icon: Receipt },
     ],
   },
   {
-    title: "Custos",
+    title: "Sistema",
     items: [
-      { title: "Custos Variáveis", href: "/variable-costs", icon: TrendingDown },
-      { title: "Custos Fixos", href: "/fixed-costs", icon: Building2 },
-    ],
-  },
-  {
-    title: "Análises",
-    items: [
-      { title: "Churn & Retenção", href: "/churn", icon: Activity },
-      { title: "LTV & CAC", href: "/ltv-cac", icon: TrendingUp },
-      { title: "Marketing & Funil", href: "/marketing", icon: Target },
       { title: "Importação de Dados", href: "/import-data", icon: Import },
-    ],
-  },
-  {
-    title: "Financeiro",
-    items: [
-      { title: "DRE", href: "/dre", icon: FileText },
-      { title: "Fluxo de Caixa", href: "/cashflow", icon: Wallet },
-      { title: "Valuation", href: "/valuation", icon: Calculator },
-    ],
-  },
-  {
-    title: "Planejamento",
-    items: [
-      { title: "Orçamento", href: "/budget", icon: PieChart },
-      { title: "Relatórios", href: "/reports", icon: BarChart3 },
     ],
   },
 ];

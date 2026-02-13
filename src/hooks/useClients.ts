@@ -11,6 +11,8 @@ export interface Client {
     plan_id: string | null;
     plan: {
         name: string;
+        price_monthly: number;
+        price_yearly: number;
     } | null;
     created_at: string;
     churn_date: string | null;
@@ -26,7 +28,8 @@ export const useClients = () => {
                 .from("clients")
                 .select(`
           *,
-          plan:plans(name)
+          *,
+          plan:plans(name, price_monthly, price_yearly)
         `)
                 .order("name");
 

@@ -82,19 +82,24 @@ export function AIChat() {
 
             const responseText = await generateFinancialResponse(userMsg.content, context);
 
-            const aiMsg: Message = {
-                id: (Date.now() + 1).toString(),
-                role: 'assistant',
-                content: responseText,
-                timestamp: new Date()
-            };
+            // Split into separate bubbles
+            const parts = responseText.split('[BREAK]').map(p => p.trim()).filter(p => p);
 
-            addMessage(aiMsg);
+            for (const part of parts) {
+                const aiMsg: Message = {
+                    id: (Date.now() + Math.random()).toString(),
+                    role: 'assistant',
+                    content: part,
+                    timestamp: new Date()
+                };
+                addMessage(aiMsg);
+                // Optional: small artificial delay could be added here if we had an async addMessage wrapper
+            }
         } catch (error) {
             const errorMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: 'assistant',
-                content: "Desculpe, ocorreu um erro ao processar sua mensagem.",
+                content: "Desculpe, a Sofia tropeçou nos cabos aqui! 🔌😅 Tente de novo?",
                 timestamp: new Date()
             };
             addMessage(errorMsg);

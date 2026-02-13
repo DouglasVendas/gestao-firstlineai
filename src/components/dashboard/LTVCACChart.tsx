@@ -1,89 +1,48 @@
 import {
-  BarChart,
+  ComposedChart,
   Bar,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Line,
-  ComposedChart,
+  Legend,
 } from "recharts";
+import { useFinancialHistory } from "@/hooks/useFinancialMetrics";
+import { format, parseISO } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Loader2 } from "lucide-react";
 
-const data = [
-  { month: "Jan", ltv: 15000, cac: 4500, ratio: 3.3 },
-  { month: "Fev", ltv: 16200, cac: 4200, ratio: 3.9 },
-  { month: "Mar", ltv: 17500, cac: 4800, ratio: 3.6 },
-  { month: "Abr", ltv: 18200, cac: 4100, ratio: 4.4 },
-  { month: "Mai", ltv: 19800, cac: 4300, ratio: 4.6 },
-  { month: "Jun", ltv: 21000, cac: 4000, ratio: 5.3 },
-];
+export function LTVCACChart() {
+  const history = useFinancialHistory();
 
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
-};
-
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (active && payload && payload.length) {
+  if (!history || history.length === 0) {
     return (
-      <div className="rounded-lg border border-border bg-card p-3 shadow-lg">
-        <p className="mb-2 font-medium text-foreground">{label}</p>
-        {payload.map((entry: any, index: number) => (
-          <div key={index} className="flex items-center gap-2">
-            <div
-              className="h-3 w-3 rounded-full"
-              style={{ backgroundColor: entry.color }}
-            />
-            <span className="text-sm text-muted-foreground">
-              {entry.dataKey === "ltv"
-                ? "LTV"
-                : entry.dataKey === "cac"
-                ? "CAC"
-                : "Ratio"}
-              :
-            </span>
-            <span className="font-mono text-sm font-medium text-foreground">
-              {entry.dataKey === "ratio"
-                ? `${entry.value.toFixed(1)}x`
-                : formatCurrency(entry.value)}
-            </span>
-          </div>
-        ))}
+      <div className="metric-card flex h-[350px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
-  return null;
-};
 
-export function LTVCACChart() {
+  const data = history.map(metric => ({
+    month: format(parseISO(metric.month), "MMM", { locale: ptBR }).replace(/^\w/, (c) => c.toUpperCase()),
+    ltv: itemValue(metric.ltv),
+    cac: itemValue(metric.cac),
+    ratio: Number(metric.ratio)
+  }));
+
+  function itemValue(val: number) {
+    return Number(val.toFixed(0));
+  }
+
   return (
     <div className="metric-card animate-slide-up">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-foreground">LTV vs CAC</h3>
-          <p className="text-sm text-muted-foreground">
-            Lifetime Value, Customer Acquisition Cost e proporção
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="h-3 w-3 rounded-full bg-primary" />
-            <span className="text-sm text-muted-foreground">LTV</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="h-3 w-3 rounded-full bg-warning" />
-            <span className="text-sm text-muted-foreground">CAC</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="h-3 w-3 rounded-full bg-success" />
-            <span className="text-sm text-muted-foreground">Ratio</span>
-          </div>
-        </div>
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-foreground">LTV vs CAC</h3>
+        <p className="text-sm text-muted-foreground">
+          Relação entre valor do cliente e custo de aquisição
+        </p>
       </div>
 
       <div className="chart-container">
@@ -99,13 +58,15 @@ export function LTVCACChart() {
               axisLine={false}
               tickLine={false}
               tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+              dy={10}
             />
             <YAxis
               yAxisId="left"
+              orientation="left"
               axisLine={false}
               tickLine={false}
               tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-              tickFormatter={formatCurrency}
+              tickFormatter={(value) => `R$${value}`}
             />
             <YAxis
               yAxisId="right"
@@ -113,40 +74,53 @@ export function LTVCACChart() {
               axisLine={false}
               tickLine={false}
               tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-              tickFormatter={(value) => `${value}x`}
-              domain={[0, 8]}
+              unit="x"
             />
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "hsl(var(--card))",
+                borderColor: "hsl(var(--border))",
+                borderRadius: "8px",
+              }}
+              formatter={(value: number, name: string) => {
+                if (name === "Ratio") return [`${value}x`, name];
+                return [
+                  new Intl.NumberFormat("pt-BR", {
+                    style: "currency",
+                    currency: "BRL",
+                  }).format(value),
+                  name.toUpperCase(),
+                ];
+              }}
+            />
+            <Legend wrapperStyle={{ paddingTop: "20px" }} />
             <Bar
               yAxisId="left"
               dataKey="ltv"
+              name="LTV"
               fill="hsl(var(--primary))"
               radius={[4, 4, 0, 0]}
+              barSize={20}
             />
             <Bar
               yAxisId="left"
               dataKey="cac"
-              fill="hsl(var(--warning))"
+              name="CAC"
+              fill="hsl(var(--destructive))"
               radius={[4, 4, 0, 0]}
+              barSize={20}
             />
             <Line
               yAxisId="right"
               type="monotone"
               dataKey="ratio"
+              name="Ratio"
               stroke="hsl(var(--success))"
               strokeWidth={2}
-              dot={{ fill: "hsl(var(--success))", strokeWidth: 0, r: 4 }}
+              dot={{ fill: "hsl(var(--success))", r: 4 }}
             />
           </ComposedChart>
         </ResponsiveContainer>
-      </div>
-
-      <div className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-success/10 p-3">
-        <span className="text-sm text-muted-foreground">Ratio atual:</span>
-        <span className="font-mono text-lg font-semibold text-success">
-          5.3x
-        </span>
-        <span className="text-sm text-success">• Saudável (ideal: {">"} 3x)</span>
       </div>
     </div>
   );

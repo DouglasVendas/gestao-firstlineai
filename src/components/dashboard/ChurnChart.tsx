@@ -7,21 +7,10 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-
-const data = [
-  { month: "Jan", churnRate: 3.2, nrr: 105 },
-  { month: "Fev", churnRate: 2.8, nrr: 108 },
-  { month: "Mar", churnRate: 3.5, nrr: 102 },
-  { month: "Abr", churnRate: 2.9, nrr: 110 },
-  { month: "Mai", churnRate: 2.4, nrr: 112 },
-  { month: "Jun", churnRate: 2.1, nrr: 115 },
-  { month: "Jul", churnRate: 2.6, nrr: 111 },
-  { month: "Ago", churnRate: 2.2, nrr: 118 },
-  { month: "Set", churnRate: 1.9, nrr: 120 },
-  { month: "Out", churnRate: 2.3, nrr: 116 },
-  { month: "Nov", churnRate: 1.8, nrr: 122 },
-  { month: "Dez", churnRate: 1.5, nrr: 125 },
-];
+import { useFinancialHistory } from "@/hooks/useFinancialMetrics";
+import { format, parseISO } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Loader2 } from "lucide-react";
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -35,7 +24,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
               style={{ backgroundColor: entry.color }}
             />
             <span className="text-sm text-muted-foreground">
-              {entry.dataKey === "churnRate" ? "Churn Rate" : "NRR"}:
+              {entry.name}:
             </span>
             <span className="font-mono text-sm font-medium text-foreground">
               {entry.value}%
@@ -49,6 +38,31 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export function ChurnChart() {
+  const history = useFinancialHistory();
+
+  if (!history || history.length === 0) {
+    return (
+      <div className="metric-card flex h-[350px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  const data = history.map(metric => ({
+    month: format(parseISO(metric.month), "MMM", { locale: ptBR }).replace(/^\w/, (c) => c.toUpperCase()),
+    churnRate: Number(metric.churnRate.toFixed(1)),
+    // NRR (Net Revenue Retention)
+    // Approximate NRR using available metrics
+    // Gross Retention = 1 - (ChurnMRR / StartMRR)
+    // Net Retention = (StartMRR - ChurnMRR + ExpansionMRR) / StartMRR
+    // StartMRR approx = EndMRR - NewMRR + ChurnMRR - ExpansionMRR + ContractionMRR
+    // Simplify: StartMRR = metric.mrr - metric.newMRR + metric.churnMRR (assuming 0 exp/cont)
+
+    nrr: metric.mrr - metric.newMRR + metric.churnMRR > 0
+      ? Number(((1 - (metric.churnMRR / (metric.mrr - metric.newMRR + metric.churnMRR))) * 100).toFixed(1))
+      : 100
+  }));
+
   return (
     <div className="metric-card animate-slide-up">
       <div className="mb-6 flex items-center justify-between">
@@ -92,7 +106,7 @@ export function ChurnChart() {
               tickLine={false}
               tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
               tickFormatter={(value) => `${value}%`}
-              domain={[0, 5]}
+              domain={[0, 'auto']}
             />
             <YAxis
               yAxisId="right"
@@ -101,13 +115,14 @@ export function ChurnChart() {
               tickLine={false}
               tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
               tickFormatter={(value) => `${value}%`}
-              domain={[90, 130]}
+              domain={[80, 120]}
             />
             <Tooltip content={<CustomTooltip />} />
             <Line
               yAxisId="left"
               type="monotone"
               dataKey="churnRate"
+              name="Churn Rate"
               stroke="hsl(var(--destructive))"
               strokeWidth={2}
               dot={{ fill: "hsl(var(--destructive))", strokeWidth: 0, r: 4 }}
@@ -117,6 +132,7 @@ export function ChurnChart() {
               yAxisId="right"
               type="monotone"
               dataKey="nrr"
+              name="NRR"
               stroke="hsl(var(--success))"
               strokeWidth={2}
               dot={{ fill: "hsl(var(--success))", strokeWidth: 0, r: 4 }}
