@@ -41,6 +41,7 @@ const navigation: NavGroup[] = [
     title: "Visão Geral",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
+      { title: "Sistema Operacional", href: "/gre", icon: Gauge, badge: "Novo" },
     ],
   },
   {

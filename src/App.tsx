@@ -16,6 +16,8 @@ import FinancialHub from "./pages/financial/FinancialHub";
 import CostsManager from "./pages/costs/CostsManager";
 import CommercialHub from "./pages/commercial/CommercialHub";
 import LegalHub from "./pages/legal/LegalHub";
+import GREBoard from "./pages/gre/GREBoard";
+import GREPillarDetail from "./pages/gre/GREPillarDetail";
 
 import { AIChat } from "@/components/AIChat";
 
@@ -42,6 +44,11 @@ const App = () => (
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/import-data" element={<ImportData />} />
+
+            {/* GRE Module Routes */}
+            <Route path="/gre" element={<GREBoard />} />
+            <Route path="/gre/pillar/:id" element={<GREPillarDetail />} />
+
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
