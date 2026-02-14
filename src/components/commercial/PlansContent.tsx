@@ -51,7 +51,7 @@ export function PlansContent() {
                     <p className="mt-1 font-mono text-2xl font-semibold text-primary">--</p>
                 </div>
                 <div className="metric-card">
-                    <p className="text-sm text-muted-foreground">ARPU Médio</p>
+                    <p className="text-sm text-muted-foreground">ARPA Médio</p>
                     <p className="mt-1 font-mono text-2xl font-semibold text-foreground">--</p>
                 </div>
             </div>

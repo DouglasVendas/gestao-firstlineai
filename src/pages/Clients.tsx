@@ -32,11 +32,7 @@ import { useUpdateClient, useDeleteClient } from "@/hooks/useUpdateClient";
 import { ClientStatusBadge } from "@/components/clients/ClientStatusBadge";
 import { CreateClientModal } from "@/components/modals/CreateClientModal";
 import { EditClientModal } from "@/components/modals/EditClientModal";
-import { formatCurrency, formatDate } from "@/lib/formatters";
-import { useToast } from "@/hooks/use-toast";
-import { useFinancialData } from "@/contexts/FinancialContext";
-import { startOfMonth, endOfMonth, parseISO, isWithinInterval, isSameMonth } from "date-fns";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ClientDetailsModal } from "@/components/modals/ClientDetailsModal";
 
 export default function Clients() {
   const { clients, invoices, selectedMonth, isLoading } = useFinancialData();
@@ -47,6 +43,8 @@ export default function Clients() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [editClient, setEditClient] = useState<Client | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [detailClient, setDetailClient] = useState<Client | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
 
   const monthStart = startOfMonth(selectedMonth);
@@ -122,15 +120,52 @@ export default function Clients() {
 
   const handleExport = () => {
     if (!filteredClients) return;
-    const header = ["Nome", "Email", "Status (Mês)", "MRR", "Inicio"];
-    const rows = filteredClients.map((c) => [c.name, c.email || '', c.calculatedStatus, c.mrr, c.start_date || '']);
+    const header = ["Nome", "Email", "Status (Mês)", "MRR", "Pagamentos", "LTV", "Tempo de Vida", "Fim do Contrato", "Receita Projetada", "Inicio"];
+
+    const rows = filteredClients.map((c) => {
+      const clientInvoices = invoices?.filter(inv => inv.client_id === c.id && inv.status === 'paid') || [];
+      const paymentCount = clientInvoices.length;
+      const ltv = clientInvoices.reduce((sum, inv) => sum + Number(inv.value), 0);
+
+      const startDate = c.start_date ? new Date(c.start_date) : new Date(c.created_at);
+      const endDate = c.churn_date ? new Date(c.churn_date) : new Date();
+      const yearsDiff = endDate.getFullYear() - startDate.getFullYear();
+      const monthsDiff = endDate.getMonth() - startDate.getMonth();
+      const totalMonths = (yearsDiff * 12) + monthsDiff;
+      const lifetimeStr = totalMonths < 1 ? "Novo" : `${totalMonths} meses`;
+
+      // Projections
+      const contractDuration = c.contract_duration || 12;
+      const contractEndDate = new Date(startDate);
+      contractEndDate.setMonth(contractEndDate.getMonth() + contractDuration);
+
+      const today = new Date();
+      const remainingTime = contractEndDate.getTime() - today.getTime();
+      const isExpired = remainingTime < 0;
+      const remainingMonths = isExpired ? 0 : Math.ceil(remainingTime / (1000 * 60 * 60 * 24 * 30));
+      const projectedRevenue = remainingMonths * c.mrr;
+
+      return [
+        c.name,
+        c.email || '',
+        c.calculatedStatus,
+        c.mrr,
+        paymentCount,
+        ltv,
+        lifetimeStr,
+        contractEndDate.toISOString().split('T')[0],
+        projectedRevenue,
+        c.start_date || ''
+      ];
+    });
+
     const csvContent =
       "data:text/csv;charset=utf-8," +
       [header.join(","), ...rows.map((e) => e.join(","))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "clientes.csv");
+    link.setAttribute("download", "clientes_completo.csv");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -241,54 +276,65 @@ export default function Clients() {
                 </tr>
               </thead>
               <tbody>
-                {filteredClients.map((client) => (
-                  <tr key={client.id}>
-                    <td className="font-medium">{client.name}</td>
-                    <td>{client.plan?.name || "-"}</td>
-                    <td className="font-mono">{formatCurrency(client.mrr)}</td>
-                    <td>
-                      <ClientStatusBadge status={client.calculatedStatus || client.status} />
-                    </td>
-                    <td className="font-mono text-muted-foreground">
-                      {client.start_date ? formatDate(client.start_date) : "-"}
-                    </td>
-                    <td>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setEditClient(client);
-                              setEditOpen(true);
-                            }}
-                          >
-                            <Edit className="mr-2 h-4 w-4" />
-                            Editar
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => handleChurn(client)}
-                            disabled={client.status === "churned"}
-                          >
-                            <UserX className="mr-2 h-4 w-4" />
-                            Cancelar assinatura
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onClick={() => setDeleteTarget(client)}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Excluir
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </td>
-                  </tr>
-                ))}
+                {filteredClients.map((client) => {
+                  return (
+                    <tr key={client.id}>
+                      <td className="font-medium">{client.name}</td>
+                      <td>{client.plan?.name || "-"}</td>
+                      <td className="font-mono">{formatCurrency(client.mrr)}</td>
+                      <td>
+                        <ClientStatusBadge status={client.calculatedStatus || client.status} />
+                      </td>
+                      <td className="font-mono text-muted-foreground">
+                        {client.start_date ? formatDate(client.start_date) : "-"}
+                      </td>
+                      <td>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setDetailClient(client);
+                                setDetailOpen(true);
+                              }}
+                            >
+                              <Info className="mr-2 h-4 w-4" />
+                              Ver Detalhes
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setEditClient(client);
+                                setEditOpen(true);
+                              }}
+                            >
+                              <Edit className="mr-2 h-4 w-4" />
+                              Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleChurn(client)}
+                              disabled={client.status === "churned"}
+                            >
+                              <UserX className="mr-2 h-4 w-4" />
+                              Cancelar assinatura
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => setDeleteTarget(client)}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Excluir
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           ) : (
@@ -304,6 +350,7 @@ export default function Clients() {
       </div>
 
       <EditClientModal client={editClient} open={editOpen} onOpenChange={setEditOpen} />
+      <ClientDetailsModal client={detailClient} invoices={invoices} open={detailOpen} onOpenChange={setDetailOpen} />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>

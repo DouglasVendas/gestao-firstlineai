@@ -36,6 +36,7 @@ const formSchema = z.object({
   name: z.string().min(1, "Nome obrigatório"),
   email: z.string().email("Email inválido").or(z.literal("")).optional(),
   mrr: z.coerce.number().min(0),
+  contract_duration: z.coerce.number().min(1).default(12),
   status: z.string(),
   plan_id: z.string().optional(),
 });
@@ -53,7 +54,7 @@ export function EditClientModal({ client, open, onOpenChange }: EditClientModalP
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
-    defaultValues: { name: "", email: "", mrr: 0, status: "active", plan_id: "" },
+    defaultValues: { name: "", email: "", mrr: 0, contract_duration: 12, status: "active", plan_id: "" },
   });
 
   useEffect(() => {
@@ -62,6 +63,7 @@ export function EditClientModal({ client, open, onOpenChange }: EditClientModalP
         name: client.name,
         email: client.email || "",
         mrr: client.mrr,
+        contract_duration: client.contract_duration || 12,
         status: client.status,
         plan_id: client.plan_id || "",
       });
@@ -77,6 +79,7 @@ export function EditClientModal({ client, open, onOpenChange }: EditClientModalP
         name: values.name,
         email: values.email || null,
         mrr: values.mrr,
+        contract_duration: values.contract_duration,
         status: values.status,
         plan_id: values.plan_id || null,
       },
@@ -138,6 +141,19 @@ export function EditClientModal({ client, open, onOpenChange }: EditClientModalP
                     <FormLabel>MRR (R$)</FormLabel>
                     <FormControl>
                       <Input type="number" step="0.01" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="contract_duration"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Duração (meses)</FormLabel>
+                    <FormControl>
+                      <Input type="number" min="1" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

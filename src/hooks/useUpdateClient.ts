@@ -10,6 +10,8 @@ interface UpdateClientData {
   plan_id?: string | null;
   churn_date?: string | null;
   churn_reason?: string | null;
+  voluntary?: boolean | null;
+  contract_duration?: number;
 }
 
 export const useUpdateClient = () => {

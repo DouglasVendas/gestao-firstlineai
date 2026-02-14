@@ -63,7 +63,7 @@ export function ContractGenerator() {
         content = content.replace(/{{CLIENT_NAME}}/g, clientName || "_________________");
         content = content.replace(/{{CLIENT_CNPJ}}/g, clientCnpj || "_________________");
         content = content.replace(/{{CLIENT_ADDRESS}}/g, clientAddress || "_________________");
-        content = content.replace(/{{SOFTWARE_NAME}}/g, "SaaS Compass");
+        content = content.replace(/{{SOFTWARE_NAME}}/g, "FirstLine");
         content = content.replace(/{{PLAN_NAME}}/g, planName);
         content = content.replace(/{{MONTHLY_VALUE}}/g, contractData.monthlyValue || planPrice);
         content = content.replace(/{{START_DATE}}/g, format(new Date(contractData.startDate), "dd/MM/yyyy"));

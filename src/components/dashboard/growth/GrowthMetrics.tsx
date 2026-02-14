@@ -103,7 +103,7 @@ export function GrowthMetrics({ currentMetric, history }: GrowthMetricsProps) {
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <MetricCard title="MRR Total" value={formatCurrency(currentMetric.mrr)} change={growthRate} icon={<DollarSign className="h-6 w-6" />} />
                     <MetricCard title="ARR" value={formatCurrency(currentMetric.arr)} change={growthRate} icon={<BarChart3 className="h-6 w-6" />} variant="success" />
-                    <MetricCard title="ARPU" value={formatCurrency(arpu)} change={arpuChange} icon={<Users className="h-6 w-6" />} />
+                    <MetricCard title="ARPA" value={formatCurrency(arpu)} change={arpuChange} icon={<Users className="h-6 w-6" />} />
                     <MetricCard title="Net New MRR" value={formatCurrency(netNewMrr)} change={growthRate} icon={<TrendingUp className="h-6 w-6" />} variant="success" />
                 </div>
             </section>

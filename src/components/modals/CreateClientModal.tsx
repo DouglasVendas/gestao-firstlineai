@@ -38,6 +38,7 @@ const formSchema = z.object({
     email: z.string().email("Email inválido").optional().or(z.literal("")),
     status: z.enum(["active", "trial", "churned", "inactive"]),
     mrr: z.coerce.number().min(0, "MRR deve ser positivo."),
+    contract_duration: z.coerce.number().min(1, "Duração mínima de 1 mês.").default(12),
     start_date: z.string().optional(),
 });
 
@@ -53,6 +54,7 @@ export function CreateClientModal() {
             email: "",
             status: "active",
             mrr: 0,
+            contract_duration: 12,
             start_date: new Date().toISOString().split("T")[0],
         },
     });
@@ -64,6 +66,7 @@ export function CreateClientModal() {
                 email: values.email || null,
                 status: values.status,
                 mrr: values.mrr,
+                contract_duration: values.contract_duration,
                 start_date: values.start_date || null,
                 plan_id: undefined,
                 churn_date: null,
@@ -139,6 +142,20 @@ export function CreateClientModal() {
 
                             <FormField
                                 control={form.control}
+                                name="contract_duration"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Duração (meses)</FormLabel>
+                                        <FormControl>
+                                            <Input type="number" min="1" {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
                                 name="status"
                                 render={({ field }) => (
                                     <FormItem>
@@ -180,19 +197,19 @@ export function CreateClientModal() {
                                 )}
                             />
 
-                        <FormField
-                            control={form.control}
-                            name="email"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Email</FormLabel>
-                                    <FormControl>
-                                        <Input type="email" placeholder="email@empresa.com" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                            <FormField
+                                control={form.control}
+                                name="email"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Email</FormLabel>
+                                        <FormControl>
+                                            <Input type="email" placeholder="email@empresa.com" {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
                         </div>
 
                         <DialogFooter>

@@ -18,6 +18,7 @@ export interface Client {
     churn_date: string | null;
     churn_reason: string | null;
     voluntary: boolean | null;
+    contract_duration: number | null;
 }
 
 export const useClients = () => {
@@ -27,7 +28,6 @@ export const useClients = () => {
             const { data, error } = await supabase
                 .from("clients")
                 .select(`
-          *,
           *,
           plan:plans(name, price_monthly, price_yearly)
         `)
@@ -78,7 +78,7 @@ export const useCreateClient = () => {
         mutationFn: async (newClient: Omit<Client, "id" | "created_at" | "plan"> & { plan_id?: string }) => {
             const { data, error } = await supabase
                 .from("clients")
-                .insert(newClient)
+                .insert({ ...newClient, contract_duration: newClient.contract_duration || 12 })
                 .select()
                 .single();
 

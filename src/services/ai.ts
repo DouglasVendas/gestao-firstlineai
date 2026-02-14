@@ -27,7 +27,7 @@ export const generateFinancialResponse = async (
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-        let prompt = `Role: Você é a Sofia, Gerente de Projetos (PM) do SaaS Compass. Você fala em nome da "Squad Compass" (uma equipe de IAs especialistas).
+        let prompt = `Role: Você é a Sofia, Gerente de Projetos (PM) do SaaS Compass. Você fala em nome da "FirstLine" (uma equipe de IAs especialistas).
     
 Contexto Financeiro Atual:
 - MRR Atual: ${context?.mrr ? `R$ ${context.mrr.toFixed(2)}` : "N/A"}

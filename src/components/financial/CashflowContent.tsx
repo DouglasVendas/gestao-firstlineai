@@ -38,7 +38,8 @@ interface CashflowItem {
     status: 'completed' | 'pending';
 }
 
-const formatCurrency = (value: number) => {
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(value)) return "R$ 0,00";
     return new Intl.NumberFormat("pt-BR", {
         style: "currency",
         currency: "BRL",
@@ -46,7 +47,12 @@ const formatCurrency = (value: number) => {
 };
 
 const formatDate = (date: string) => {
-    return new Intl.DateTimeFormat("pt-BR").format(new Date(date));
+    try {
+        if (!date) return "-";
+        return new Intl.DateTimeFormat("pt-BR").format(new Date(date));
+    } catch (e) {
+        return "-";
+    }
 };
 
 export function CashflowContent() {
