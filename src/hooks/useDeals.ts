@@ -12,6 +12,7 @@ export interface Deal {
     company: string | null;
     contact_name: string | null;
     contact_email: string | null;
+    contact_phone: string | null;
     value: number;
     stage: 'lead' | 'qualified' | 'proposal' | 'negotiation' | 'closed_won' | 'closed_lost';
     priority: 'cold' | 'warm' | 'hot';
@@ -95,12 +96,12 @@ const MOCK_TAGS: DealTag[] = [
 ];
 
 export const MOCK_DEALS: Deal[] = [
-    { id: '1', title: 'Contrato Enterprise ABC', company: 'ABC Corp', contact_name: 'João Silva', contact_email: 'joao@abc.com', value: 15000, stage: 'negotiation', priority: 'hot', notes: 'Reunião marcada para sexta', source: 'Indicação', lost_reason: null, expected_close_date: '2026-03-01', next_followup_date: '2026-02-17', next_followup_type: 'meeting', plan_id: null, billing_cycle: 'monthly', utm_source: null, utm_medium: null, utm_campaign: null, landing_page_url: null, created_at: '2026-02-01T10:00:00Z', updated_at: new Date().toISOString(), tags: [MOCK_TAGS[2], MOCK_TAGS[3]] },
-    { id: '2', title: 'Expansão Plano Pro', company: 'Tech Solutions', contact_name: 'Maria Santos', contact_email: 'maria@tech.com', value: 5000, stage: 'proposal', priority: 'warm', notes: 'Proposta enviada, aguardando retorno', source: 'Inbound', lost_reason: null, expected_close_date: '2026-03-15', next_followup_date: '2026-02-18', next_followup_type: 'call', plan_id: null, billing_cycle: 'monthly', utm_source: 'google', utm_medium: 'cpc', utm_campaign: 'saas-compass-brand', landing_page_url: '/landing/demo', created_at: '2026-02-05T14:00:00Z', updated_at: new Date().toISOString(), tags: [MOCK_TAGS[0]] },
-    { id: '3', title: 'Novo Cliente - Startup XYZ', company: 'Startup XYZ', contact_name: 'Pedro Lima', contact_email: 'pedro@xyz.com', value: 2500, stage: 'lead', priority: 'cold', notes: 'Indicação do Carlos', source: 'Indicação', lost_reason: null, expected_close_date: null, next_followup_date: '2026-02-20', next_followup_type: 'email', plan_id: null, billing_cycle: null, utm_source: null, utm_medium: null, utm_campaign: null, landing_page_url: null, created_at: '2026-02-10T09:00:00Z', updated_at: new Date().toISOString(), tags: [MOCK_TAGS[1], MOCK_TAGS[3]] },
-    { id: '4', title: 'Migração Plataforma Delta', company: 'Delta Ltda', contact_name: 'Ana Costa', contact_email: 'ana@delta.com', value: 8000, stage: 'qualified', priority: 'warm', notes: 'Demonstração agendada', source: 'Website', lost_reason: null, expected_close_date: '2026-02-28', next_followup_date: '2026-02-16', next_followup_type: 'meeting', plan_id: null, billing_cycle: 'monthly', utm_source: 'google', utm_medium: 'organic', utm_campaign: null, landing_page_url: '/precos', created_at: '2026-02-03T11:00:00Z', updated_at: new Date().toISOString(), tags: [] },
-    { id: '5', title: 'Licença Anual GammaFi', company: 'GammaFi', contact_name: 'Lucas Rocha', contact_email: 'lucas@gammafi.com', value: 24000, stage: 'closed_won', priority: 'hot', notes: 'Contrato assinado!', source: 'Outbound', lost_reason: null, expected_close_date: '2026-02-10', next_followup_date: null, next_followup_type: null, plan_id: null, billing_cycle: 'yearly', utm_source: null, utm_medium: null, utm_campaign: null, landing_page_url: null, created_at: '2026-01-15T08:00:00Z', updated_at: new Date().toISOString(), tags: [MOCK_TAGS[2], MOCK_TAGS[4]] },
-    { id: '6', title: 'SaaS Pack Omega', company: 'Omega Inc', contact_name: 'Fernanda Alves', contact_email: 'fer@omega.com', value: 12000, stage: 'lead', priority: 'warm', notes: 'Primeiro contato via LinkedIn', source: 'LinkedIn', lost_reason: null, expected_close_date: '2026-04-01', next_followup_date: '2026-02-19', next_followup_type: 'whatsapp', plan_id: null, billing_cycle: null, utm_source: 'linkedin', utm_medium: 'social', utm_campaign: 'saas-awareness', landing_page_url: '/landing/linkedin', created_at: '2026-02-12T16:00:00Z', updated_at: new Date().toISOString(), tags: [MOCK_TAGS[1]] },
+    { id: '1', title: 'Contrato Enterprise ABC', company: 'ABC Corp', contact_name: 'João Silva', contact_email: 'joao@abc.com', contact_phone: '5511999998888', value: 15000, stage: 'negotiation', priority: 'hot', notes: 'Reunião marcada para sexta', source: 'Indicação', lost_reason: null, expected_close_date: '2026-03-01', next_followup_date: '2026-02-17', next_followup_type: 'meeting', plan_id: null, billing_cycle: 'monthly', utm_source: null, utm_medium: null, utm_campaign: null, landing_page_url: null, created_at: '2026-02-01T10:00:00Z', updated_at: new Date().toISOString(), tags: [MOCK_TAGS[2], MOCK_TAGS[3]] },
+    { id: '2', title: 'Expansão Plano Pro', company: 'Tech Solutions', contact_name: 'Maria Santos', contact_email: 'maria@tech.com', contact_phone: '5511988887777', value: 5000, stage: 'proposal', priority: 'warm', notes: 'Proposta enviada, aguardando retorno', source: 'Inbound', lost_reason: null, expected_close_date: '2026-03-15', next_followup_date: '2026-02-18', next_followup_type: 'call', plan_id: null, billing_cycle: 'monthly', utm_source: 'google', utm_medium: 'cpc', utm_campaign: 'saas-compass-brand', landing_page_url: '/landing/demo', created_at: '2026-02-05T14:00:00Z', updated_at: new Date().toISOString(), tags: [MOCK_TAGS[0]] },
+    { id: '3', title: 'Novo Cliente - Startup XYZ', company: 'Startup XYZ', contact_name: 'Pedro Lima', contact_email: 'pedro@xyz.com', contact_phone: null, value: 2500, stage: 'lead', priority: 'cold', notes: 'Indicação do Carlos', source: 'Indicação', lost_reason: null, expected_close_date: null, next_followup_date: '2026-02-20', next_followup_type: 'email', plan_id: null, billing_cycle: null, utm_source: null, utm_medium: null, utm_campaign: null, landing_page_url: null, created_at: '2026-02-10T09:00:00Z', updated_at: new Date().toISOString(), tags: [MOCK_TAGS[1], MOCK_TAGS[3]] },
+    { id: '4', title: 'Migração Plataforma Delta', company: 'Delta Ltda', contact_name: 'Ana Costa', contact_email: 'ana@delta.com', contact_phone: '5521977776666', value: 8000, stage: 'qualified', priority: 'warm', notes: 'Demonstração agendada', source: 'Website', lost_reason: null, expected_close_date: '2026-02-28', next_followup_date: '2026-02-16', next_followup_type: 'meeting', plan_id: null, billing_cycle: 'monthly', utm_source: 'google', utm_medium: 'organic', utm_campaign: null, landing_page_url: '/precos', created_at: '2026-02-03T11:00:00Z', updated_at: new Date().toISOString(), tags: [] },
+    { id: '5', title: 'Licença Anual GammaFi', company: 'GammaFi', contact_name: 'Lucas Rocha', contact_email: 'lucas@gammafi.com', contact_phone: '5531966665555', value: 24000, stage: 'closed_won', priority: 'hot', notes: 'Contrato assinado!', source: 'Outbound', lost_reason: null, expected_close_date: '2026-02-10', next_followup_date: null, next_followup_type: null, plan_id: null, billing_cycle: 'yearly', utm_source: null, utm_medium: null, utm_campaign: null, landing_page_url: null, created_at: '2026-01-15T08:00:00Z', updated_at: new Date().toISOString(), tags: [MOCK_TAGS[2], MOCK_TAGS[4]] },
+    { id: '6', title: 'SaaS Pack Omega', company: 'Omega Inc', contact_name: 'Fernanda Alves', contact_email: 'fer@omega.com', contact_phone: null, value: 12000, stage: 'lead', priority: 'warm', notes: 'Primeiro contato via LinkedIn', source: 'LinkedIn', lost_reason: null, expected_close_date: '2026-04-01', next_followup_date: '2026-02-19', next_followup_type: 'whatsapp', plan_id: null, billing_cycle: null, utm_source: 'linkedin', utm_medium: 'social', utm_campaign: 'saas-awareness', landing_page_url: '/landing/linkedin', created_at: '2026-02-12T16:00:00Z', updated_at: new Date().toISOString(), tags: [MOCK_TAGS[1]] },
 ];
 
 const MOCK_ACTIVITIES: DealActivity[] = [
@@ -280,10 +281,20 @@ export function useDealActivities(dealId: string | null) {
         onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
     });
 
+    const updateActivity = useMutation({
+        mutationFn: async ({ id, ...updates }: Partial<DealActivity> & { id: string }) => {
+            const { error } = await supabase.from('deal_activities' as any)
+                .update({ ...updates, updated_at: new Date().toISOString() } as any).eq('id', id);
+            if (error) throw error;
+        },
+        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['deal-activities', dealId] }); toast({ title: "Atividade Atualizada!" }); },
+        onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
+    });
+
     const pendingActivities = activities.filter(a => !a.is_completed);
     const completedActivities = activities.filter(a => a.is_completed);
 
-    return { activities, isLoading, addActivity: addActivity.mutate, completeActivity: completeActivity.mutate, deleteActivity: deleteActivity.mutate, pendingActivities, completedActivities, isAdding: addActivity.isPending };
+    return { activities, isLoading, addActivity: addActivity.mutate, updateActivity: updateActivity.mutate, completeActivity: completeActivity.mutate, deleteActivity: deleteActivity.mutate, pendingActivities, completedActivities, isAdding: addActivity.isPending };
 }
 
 // ═══════════════════════════════════════════════════════════

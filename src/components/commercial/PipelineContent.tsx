@@ -29,7 +29,7 @@ import {
 import {
     Plus, DollarSign, TrendingUp, User, Building2, Mail, Calendar as CalendarIcon,
     ChevronRight, ChevronLeft, Trophy, Loader2, Flame, Clock, CheckCircle2,
-    Circle, Target, Zap, Trash2, X, Tag, Edit2, Save, GripVertical, Package,
+    Circle, Target, Zap, Trash2, X, Tag, Edit2, Save, GripVertical, Package, Phone,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -257,8 +257,29 @@ function DroppableColumn({ stage, children }: { stage: string; children: React.R
 // ═══════════════════════════════════════════════
 // ACTIVITY ITEM
 // ═══════════════════════════════════════════════
-function ActivityItem({ activity, onComplete, onDelete }: { activity: DealActivity; onComplete: (id: string) => void; onDelete: (id: string) => void }) {
+function ActivityItem({ activity, onComplete, onDelete, onUpdate }: { activity: DealActivity; onComplete: (id: string) => void; onDelete: (id: string) => void; onUpdate: (data: any) => void }) {
+    const [isEditing, setIsEditing] = useState(false);
     const icon = ACTIVITY_ICONS[activity.type];
+
+    if (isEditing) {
+        return (
+            <ActivityForm
+                initialValues={{
+                    type: activity.type,
+                    title: activity.title,
+                    description: activity.description || '',
+                    scheduled_at: activity.scheduled_at || ''
+                }}
+                onSubmit={(data) => {
+                    onUpdate({ id: activity.id, ...data });
+                    setIsEditing(false);
+                }}
+                onCancel={() => setIsEditing(false)}
+                isSubmitting={false}
+            />
+        );
+    }
+
     return (
         <div className="flex gap-3 group">
             <div className="flex flex-col items-center">
@@ -274,6 +295,9 @@ function ActivityItem({ activity, onComplete, onDelete }: { activity: DealActivi
                                 <CheckCircle2 className="h-3 w-3 mr-1" /> Concluir
                             </Button>
                         )}
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground opacity-0 group-hover:opacity-100" onClick={() => setIsEditing(true)}>
+                            <Edit2 className="h-3 w-3" />
+                        </Button>
                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive opacity-0 group-hover:opacity-100" onClick={() => onDelete(activity.id)}>
                             <Trash2 className="h-3 w-3" />
                         </Button>
@@ -290,19 +314,27 @@ function ActivityItem({ activity, onComplete, onDelete }: { activity: DealActivi
     );
 }
 
-// ═══════════════════════════════════════════════
-// ADD ACTIVITY FORM
-// ═══════════════════════════════════════════════
-function AddActivityForm({ dealId, onAdd, isAdding }: { dealId: string; onAdd: (a: any) => void; isAdding: boolean }) {
-    const [form, setForm] = useState({ type: 'call' as DealActivity['type'], title: '', description: '', scheduled_at: '' });
+// ═══════════════════════════════════════════════════════════
+// ACTIVITY FORM (Reusable)
+// ═══════════════════════════════════════════════════════════
+function ActivityForm({ initialValues, onSubmit, onCancel, submitLabel = "Salvar", isSubmitting }: {
+    initialValues: { type: DealActivity['type']; title: string; description: string; scheduled_at: string };
+    onSubmit: (data: any) => void;
+    onCancel?: () => void;
+    submitLabel?: string;
+    isSubmitting: boolean;
+}) {
+    const [form, setForm] = useState(initialValues);
     const handleSubmit = () => {
         if (!form.title) return;
-        onAdd({ deal_id: dealId, type: form.type, title: form.title, description: form.description || null, outcome: null, scheduled_at: form.scheduled_at || null, completed_at: null, is_completed: false });
-        setForm({ type: 'call', title: '', description: '', scheduled_at: '' });
+        onSubmit(form);
     };
+
     return (
         <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1"><Plus className="h-3 w-3" /> Nova Atividade</h4>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                {onCancel ? <Edit2 className="h-3 w-3" /> : <Plus className="h-3 w-3" />} {onCancel ? "Editar Atividade" : "Nova Atividade"}
+            </h4>
             <div className="grid grid-cols-2 gap-2">
                 <div>
                     <Label className="text-xs">Tipo</Label>
@@ -321,10 +353,29 @@ function AddActivityForm({ dealId, onAdd, isAdding }: { dealId: string; onAdd: (
                 <Label className="text-xs">Descrição</Label>
                 <Textarea className="text-xs min-h-[40px]" placeholder="Detalhes..." value={form.description} onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} />
             </div>
-            <Button size="sm" className="w-full h-7 text-xs" onClick={handleSubmit} disabled={!form.title || isAdding}>
-                {isAdding ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Plus className="h-3 w-3 mr-1" />} Registrar
-            </Button>
+            <div className="flex gap-2">
+                {onCancel && <Button variant="outline" size="sm" className="flex-1 h-7 text-xs" onClick={onCancel}>Cancelar</Button>}
+                <Button size="sm" className={`h-7 text-xs ${onCancel ? 'flex-1' : 'w-full'}`} onClick={handleSubmit} disabled={!form.title || isSubmitting}>
+                    {isSubmitting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : (onCancel ? <Save className="h-3 w-3 mr-1" /> : <Plus className="h-3 w-3 mr-1" />)} {submitLabel}
+                </Button>
+            </div>
         </div>
+    );
+}
+
+function AddActivityForm({ dealId, onAdd, isAdding }: { dealId: string; onAdd: (a: any) => void; isAdding: boolean }) {
+    const [key, setKey] = useState(0); // Force reset on submit
+    return (
+        <ActivityForm
+            key={key}
+            initialValues={{ type: 'call', title: '', description: '', scheduled_at: '' }}
+            onSubmit={(data) => {
+                onAdd({ deal_id: dealId, type: data.type, title: data.title, description: data.description || null, outcome: null, scheduled_at: data.scheduled_at || null, completed_at: null, is_completed: false });
+                setKey(k => k + 1);
+            }}
+            isSubmitting={isAdding}
+            submitLabel="Registrar"
+        />
     );
 }
 
@@ -337,6 +388,10 @@ function PlanSelector({ deal, onUpdate }: { deal: Deal; onUpdate: (updates: Part
     const cycle = deal.billing_cycle || 'monthly';
 
     const handlePlanSelect = (planId: string) => {
+        if (planId === 'none') {
+            onUpdate({ id: deal.id, plan_id: null });
+            return;
+        }
         const plan = plans.find(p => p.id === planId);
         if (plan) {
             const value = cycle === 'yearly' ? plan.price_yearly : plan.price_monthly;
@@ -365,6 +420,7 @@ function PlanSelector({ deal, onUpdate }: { deal: Deal; onUpdate: (updates: Part
                     <Select value={deal.plan_id || ''} onValueChange={handlePlanSelect}>
                         <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Selecionar plano" /></SelectTrigger>
                         <SelectContent>
+                            <SelectItem value="none" className="text-xs text-muted-foreground italic">-- Sem plano (Personalizado) --</SelectItem>
                             {plans.map(p => (
                                 <SelectItem key={p.id} value={p.id} className="text-xs">
                                     {p.name} — {fmt(p.price_monthly)}/mês
@@ -405,21 +461,22 @@ function PlanSelector({ deal, onUpdate }: { deal: Deal; onUpdate: (updates: Part
 // ═══════════════════════════════════════════════
 // DEAL DETAIL SHEET
 // ═══════════════════════════════════════════════
-function DealDetailSheet({ deal, open, onClose, onUpdateDeal }: {
+function DealDetailSheet({ deal, open, onClose, onUpdateDeal, onDeleteDeal }: {
     deal: Deal | null; open: boolean; onClose: () => void;
-    onUpdateDeal: (updates: Partial<Deal> & { id: string }) => void;
+    onUpdateDeal: (updates: Partial<Deal> & { id: string }) => void; onDeleteDeal: (id: string) => void;
 }) {
-    const { activities, pendingActivities, completedActivities, addActivity, completeActivity, deleteActivity, isAdding } = useDealActivities(deal?.id || null);
+    const { activities, pendingActivities, completedActivities, addActivity, updateActivity, completeActivity, deleteActivity, isAdding } = useDealActivities(deal?.id || null);
     const { createTag } = useDealTags();
     const [editing, setEditing] = useState(false);
     const [editForm, setEditForm] = useState<Partial<Deal>>({});
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
     if (!deal) return null;
 
     const stageConfig = STAGE_CONFIG[deal.stage];
 
     const startEdit = () => {
-        setEditForm({ company: deal.company, contact_name: deal.contact_name, contact_email: deal.contact_email, source: deal.source, expected_close_date: deal.expected_close_date });
+        setEditForm({ company: deal.company, contact_name: deal.contact_name, contact_email: deal.contact_email, contact_phone: deal.contact_phone, source: deal.source, expected_close_date: deal.expected_close_date });
         setEditing(true);
     };
     const saveEdit = () => {
@@ -440,18 +497,26 @@ function DealDetailSheet({ deal, open, onClose, onUpdateDeal }: {
             <SheetContent className="w-full sm:max-w-[560px] p-0 flex flex-col">
                 {/* Header */}
                 <div className="p-5 pb-4 border-b space-y-3">
-                    <SheetHeader>
-                        <div className="flex items-center gap-2">
-                            <Badge className={`${stageConfig.textOnBg} text-xs`}>{stageConfig.label}</Badge>
-                            <PriorityBadge priority={deal.priority} />
-                            <Select value={deal.priority} onValueChange={(v) => onUpdateDeal({ id: deal.id, priority: v as Deal['priority'] })}>
-                                <SelectTrigger className="h-6 w-20 text-[10px] border-dashed"><SelectValue /></SelectTrigger>
-                                <SelectContent>{Object.entries(PRIORITY_CONFIG).map(([k, v]) => (<SelectItem key={k} value={k} className="text-xs">{v.emoji} {v.label}</SelectItem>))}</SelectContent>
-                            </Select>
+                    <div className="flex items-start justify-between gap-4 w-full">
+                        <div className="space-y-1">
+                            <SheetTitle className="text-xl font-bold leading-none">{deal.title}</SheetTitle>
+                            <SheetDescription className="text-xs">Criado em {new Date(deal.created_at).toLocaleDateString()}</SheetDescription>
                         </div>
-                        <SheetTitle className="text-xl">{deal.title}</SheetTitle>
-                        <SheetDescription>{deal.company || 'Sem empresa'}</SheetDescription>
-                    </SheetHeader>
+                        <div className="flex items-center gap-2">
+                            <Badge className={`${stageConfig.bgColor} ${stageConfig.color} border-0`}>{stageConfig.label}</Badge>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => setDeleteDialogOpen(true)}>
+                                <Trash2 className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}><X className="h-4 w-4" /></Button>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <PriorityBadge priority={deal.priority} />
+                        <Select value={deal.priority} onValueChange={(v) => onUpdateDeal({ id: deal.id, priority: v as Deal['priority'] })}>
+                            <SelectTrigger className="h-6 w-20 text-[10px] border-dashed"><SelectValue /></SelectTrigger>
+                            <SelectContent>{Object.entries(PRIORITY_CONFIG).map(([k, v]) => (<SelectItem key={k} value={k} className="text-xs">{v.emoji} {v.label}</SelectItem>))}</SelectContent>
+                        </Select>
+                    </div>
                     <div className="grid grid-cols-3 gap-3">
                         <div className="rounded-lg bg-primary/5 p-2.5 text-center"><p className="text-lg font-bold text-primary">{fmt(deal.value)}</p><p className="text-[10px] text-muted-foreground">Valor</p></div>
                         <div className="rounded-lg bg-muted/50 p-2.5 text-center"><p className="text-lg font-bold">{daysAgo(deal.created_at)}d</p><p className="text-[10px] text-muted-foreground">No Funil</p></div>
@@ -479,6 +544,7 @@ function DealDetailSheet({ deal, open, onClose, onUpdateDeal }: {
                                     <div className="grid gap-1"><Label className="text-[10px]">Empresa</Label><Input className="h-7 text-xs" value={editForm.company || ''} onChange={(e) => setEditForm(f => ({ ...f, company: e.target.value }))} /></div>
                                     <div className="grid gap-1"><Label className="text-[10px]">Nome</Label><Input className="h-7 text-xs" value={editForm.contact_name || ''} onChange={(e) => setEditForm(f => ({ ...f, contact_name: e.target.value }))} /></div>
                                     <div className="grid gap-1"><Label className="text-[10px]">Email</Label><Input className="h-7 text-xs" value={editForm.contact_email || ''} onChange={(e) => setEditForm(f => ({ ...f, contact_email: e.target.value }))} /></div>
+                                    <div className="grid gap-1"><Label className="text-[10px]">Telefone</Label><Input className="h-7 text-xs" placeholder="5511999999999" value={editForm.contact_phone || ''} onChange={(e) => setEditForm(f => ({ ...f, contact_phone: e.target.value }))} /></div>
                                     <div className="grid gap-1"><Label className="text-[10px]">Fonte</Label>
                                         <Select value={editForm.source || ''} onValueChange={(v) => setEditForm(f => ({ ...f, source: v }))}>
                                             <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Selecione" /></SelectTrigger>
@@ -493,6 +559,14 @@ function DealDetailSheet({ deal, open, onClose, onUpdateDeal }: {
                                 <div className="grid grid-cols-2 gap-2">
                                     {deal.contact_name && <div className="flex items-center gap-2 text-sm bg-muted/30 rounded-md p-2"><User className="h-4 w-4 text-muted-foreground" />{deal.contact_name}</div>}
                                     {deal.contact_email && <div className="flex items-center gap-2 text-sm bg-muted/30 rounded-md p-2 truncate"><Mail className="h-4 w-4 text-muted-foreground shrink-0" /><span className="truncate">{deal.contact_email}</span></div>}
+                                    {deal.contact_phone && (
+                                        <div className="flex items-center justify-between gap-2 text-sm bg-muted/30 rounded-md p-2 col-span-2">
+                                            <div className="flex items-center gap-2"><Phone className="h-4 w-4 text-muted-foreground shrink-0" />{deal.contact_phone}</div>
+                                            <a href={`https://web.whatsapp.com/send?phone=${deal.contact_phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-2 py-1 bg-green-500 hover:bg-green-600 text-white text-[10px] font-bold rounded-md transition-colors">
+                                                <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WA" className="w-3 h-3 brightness-0 invert" /> WhatsApp
+                                            </a>
+                                        </div>
+                                    )}
                                     {deal.source && <div className="flex items-center gap-2 text-sm bg-muted/30 rounded-md p-2"><Zap className="h-4 w-4 text-muted-foreground" />Fonte: {deal.source}</div>}
                                     {deal.expected_close_date && <div className="flex items-center gap-2 text-sm bg-muted/30 rounded-md p-2"><Target className="h-4 w-4 text-muted-foreground" />Prev: {new Date(deal.expected_close_date).toLocaleDateString('pt-BR')}</div>}
                                 </div>
@@ -530,7 +604,7 @@ function DealDetailSheet({ deal, open, onClose, onUpdateDeal }: {
                         {pendingActivities.length > 0 && (
                             <div className="space-y-2">
                                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><Circle className="h-3 w-3 text-amber-500" /> Pendentes ({pendingActivities.length})</h3>
-                                {pendingActivities.map(a => (<ActivityItem key={a.id} activity={a} onComplete={(id) => completeActivity({ id })} onDelete={deleteActivity} />))}
+                                {pendingActivities.map(a => (<ActivityItem key={a.id} activity={a} onComplete={(id) => completeActivity({ id })} onDelete={deleteActivity} onUpdate={updateActivity} />))}
                             </div>
                         )}
 
@@ -538,7 +612,7 @@ function DealDetailSheet({ deal, open, onClose, onUpdateDeal }: {
                         {completedActivities.length > 0 && (
                             <div className="space-y-2">
                                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><CheckCircle2 className="h-3 w-3 text-green-500" /> Concluídas ({completedActivities.length})</h3>
-                                {completedActivities.map(a => (<ActivityItem key={a.id} activity={a} onComplete={() => { }} onDelete={deleteActivity} />))}
+                                {completedActivities.map(a => (<ActivityItem key={a.id} activity={a} onComplete={() => { }} onDelete={deleteActivity} onUpdate={updateActivity} />))}
                             </div>
                         )}
 
@@ -556,6 +630,16 @@ function DealDetailSheet({ deal, open, onClose, onUpdateDeal }: {
                     )}
                 </div>
             </SheetContent>
+
+            <DeleteDealDialog
+                open={deleteDialogOpen}
+                onOpenChange={setDeleteDialogOpen}
+                onConfirm={() => {
+                    onDeleteDeal(deal.id);
+                    setDeleteDialogOpen(false);
+                    onClose();
+                }}
+            />
         </Sheet>
     );
 }
@@ -565,12 +649,12 @@ function DealDetailSheet({ deal, open, onClose, onUpdateDeal }: {
 // ═══════════════════════════════════════════════
 function CreateDealModal({ onCreate, isCreating }: { onCreate: (d: any) => void; isCreating: boolean }) {
     const [open, setOpen] = useState(false);
-    const [form, setForm] = useState({ title: '', company: '', contact_name: '', contact_email: '', value: '', stage: 'lead' as Deal['stage'], priority: 'warm' as Deal['priority'], notes: '', expected_close_date: '', source: '', next_followup_date: '', next_followup_type: 'call' });
+    const [form, setForm] = useState({ title: '', company: '', contact_name: '', contact_email: '', contact_phone: '', value: '', stage: 'lead' as Deal['stage'], priority: 'warm' as Deal['priority'], notes: '', expected_close_date: '', source: '', next_followup_date: '', next_followup_type: 'call' });
 
     const handleSubmit = () => {
         if (!form.title) return;
-        onCreate({ title: form.title, company: form.company || null, contact_name: form.contact_name || null, contact_email: form.contact_email || null, value: parseFloat(form.value) || 0, stage: form.stage, priority: form.priority, notes: form.notes || null, expected_close_date: form.expected_close_date || null, source: form.source || null, lost_reason: null, next_followup_date: form.next_followup_date || null, next_followup_type: form.next_followup_type || null, plan_id: null, billing_cycle: 'monthly' });
-        setForm({ title: '', company: '', contact_name: '', contact_email: '', value: '', stage: 'lead', priority: 'warm', notes: '', expected_close_date: '', source: '', next_followup_date: '', next_followup_type: 'call' });
+        onCreate({ title: form.title, company: form.company || null, contact_name: form.contact_name || null, contact_email: form.contact_email || null, contact_phone: form.contact_phone || null, value: parseFloat(form.value) || 0, stage: form.stage, priority: form.priority, notes: form.notes || null, expected_close_date: form.expected_close_date || null, source: form.source || null, lost_reason: null, next_followup_date: form.next_followup_date || null, next_followup_type: form.next_followup_type || null, plan_id: null, billing_cycle: 'monthly' });
+        setForm({ title: '', company: '', contact_name: '', contact_email: '', contact_phone: '', value: '', stage: 'lead', priority: 'warm', notes: '', expected_close_date: '', source: '', next_followup_date: '', next_followup_type: 'call' });
         setOpen(false);
     };
 
@@ -592,6 +676,7 @@ function CreateDealModal({ onCreate, isCreating }: { onCreate: (d: any) => void;
                         <div className="grid gap-2"><Label>Contato</Label><Input placeholder="Nome" value={form.contact_name} onChange={(e) => setForm(f => ({ ...f, contact_name: e.target.value }))} /></div>
                         <div className="grid gap-2"><Label>Email</Label><Input type="email" placeholder="email@empresa.com" value={form.contact_email} onChange={(e) => setForm(f => ({ ...f, contact_email: e.target.value }))} /></div>
                     </div>
+                    <div className="grid gap-2"><Label>Telefone (WhatsApp)</Label><Input placeholder="5511999999999" value={form.contact_phone} onChange={(e) => setForm(f => ({ ...f, contact_phone: e.target.value }))} /></div>
                     <div className="grid grid-cols-3 gap-4">
                         <div className="grid gap-2"><Label>Estágio</Label><Select value={form.stage} onValueChange={(v) => setForm(f => ({ ...f, stage: v as Deal['stage'] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ACTIVE_STAGES.filter(s => s !== 'closed_lost').map(s => (<SelectItem key={s} value={s}>{STAGE_CONFIG[s].label}</SelectItem>))}</SelectContent></Select></div>
                         <div className="grid gap-2"><Label>Temperatura</Label><Select value={form.priority} onValueChange={(v) => setForm(f => ({ ...f, priority: v as Deal['priority'] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(PRIORITY_CONFIG).map(([k, v]) => (<SelectItem key={k} value={k}>{v.emoji} {v.label}</SelectItem>))}</SelectContent></Select></div>
@@ -613,11 +698,49 @@ function CreateDealModal({ onCreate, isCreating }: { onCreate: (d: any) => void;
 }
 
 // ═══════════════════════════════════════════════════════════
+function DeleteDealDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+    const [confirmText, setConfirmText] = useState('');
+
+    return (
+        <Dialog open={open} onOpenChange={(v) => { if (!v) setConfirmText(''); onOpenChange(v); }}>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Excluir Negócio</DialogTitle>
+                    <DialogDescription>
+                        Esta ação removerá o negócio e todo o histórico permanentemente.
+                        <br />Para confirmar, digite <strong className="text-red-600">EXCLUIR</strong> abaixo.
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="py-2">
+                    <Input
+                        value={confirmText}
+                        onChange={(e) => setConfirmText(e.target.value)}
+                        placeholder="Digite EXCLUIR para confirmar"
+                        className="border-red-200 focus-visible:ring-red-500"
+                    />
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+                    <Button
+                        variant="destructive"
+                        disabled={confirmText !== 'EXCLUIR'}
+                        onClick={onConfirm}
+                    >
+                        Excluir Permanentemente
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+// ═══════════════════════════════════════════════════════════
 // MAIN PIPELINE
 // ═══════════════════════════════════════════════════════════
 export function PipelineContent() {
-    const { deals, isLoading, createDeal, updateDeal, pipelineValue, wonValue, activeDeals, hotDeals, isCreating } = useDeals();
-    const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
+    const { deals, isLoading, createDeal, updateDeal, deleteDeal, pipelineValue, wonValue, activeDeals, hotDeals, isCreating } = useDeals();
+    const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+    const selectedDeal = deals.find(d => d.id === selectedDealId) || null;
     const [draggingDeal, setDraggingDeal] = useState<Deal | null>(null);
 
     const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -675,7 +798,7 @@ export function PipelineContent() {
                                 </div>
                                 <DroppableColumn stage={stage}>
                                     {stageDeals.map(deal => (
-                                        <DraggableDealCard key={deal.id} deal={deal} onClick={() => setSelectedDeal(deal)} />
+                                        <DraggableDealCard key={deal.id} deal={deal} onClick={() => setSelectedDealId(deal.id)} />
                                     ))}
                                     {stageDeals.length === 0 && (
                                         <div className="border-2 border-dashed rounded-lg p-4 text-center text-xs text-muted-foreground">Nenhum negócio</div>
@@ -689,7 +812,7 @@ export function PipelineContent() {
             </DndContext>
 
             {/* Detail Sheet */}
-            <DealDetailSheet deal={selectedDeal} open={!!selectedDeal} onClose={() => setSelectedDeal(null)} onUpdateDeal={updateDeal} />
+            <DealDetailSheet deal={selectedDeal} open={!!selectedDealId} onClose={() => setSelectedDealId(null)} onUpdateDeal={updateDeal} onDeleteDeal={deleteDeal} />
         </div>
     );
 }

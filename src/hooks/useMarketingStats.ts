@@ -95,6 +95,19 @@ export function calculateFunnelFromDeals(allDeals: any[]) {
     return { funnel, channelPerformance };
 }
 
+const INITIAL_FUNNEL_DATA = {
+    funnel: {
+        visitors: 0,
+        leads: 0,
+        mql: 0,
+        sql: 0,
+        opportunities: 0,
+        customers: 0
+    },
+    channelPerformance: [] as ChannelPerformance[],
+    allDeals: MOCK_DEALS
+};
+
 export const useDynamicFunnel = () => {
     return useQuery({
         queryKey: ["dynamic_funnel"],
@@ -138,6 +151,8 @@ export const useDynamicFunnel = () => {
             // Retornar também os deals raw para filtro no frontend
             return { ...result, allDeals };
         },
+        retry: false,
+        initialData: INITIAL_FUNNEL_DATA,
     });
 };
 

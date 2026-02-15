@@ -20,6 +20,7 @@ import GREBoard from "./pages/gre/GREBoard";
 import GREPillarDetail from "./pages/gre/GREPillarDetail";
 
 import { AIChat } from "@/components/AIChat";
+import { SetupWizard } from "@/components/onboarding/SetupWizard";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +30,7 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
+        <SetupWizard />
         <AIChat />
         <BrowserRouter>
           <Routes>

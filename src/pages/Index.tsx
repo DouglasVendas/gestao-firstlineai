@@ -21,6 +21,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GrowthMetrics } from "@/components/dashboard/growth/GrowthMetrics";
 import { RetentionMetrics } from "@/components/dashboard/retention/RetentionMetrics";
 
+import { useSettings } from "@/hooks/useSettings";
+
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
@@ -32,6 +34,7 @@ const formatCurrency = (value: number) => {
 
 export default function Index() {
   const { current, previous, isLoading } = useFinancialSnapshot();
+  const { settings } = useSettings();
   const history = useFinancialHistory();
 
   if (isLoading || !current) {
@@ -120,6 +123,40 @@ export default function Index() {
               variant="primary"
               allowPrivacy={true}
             />
+            <MetricCard
+              title="Saldo (Caixa)"
+              value={formatCurrency(current.cashBalance)}
+              change={0}
+              icon={<Wallet className="h-6 w-6" />}
+              variant="primary"
+              allowPrivacy={true}
+            />
+          </div>
+
+          {/* Goal Widget */}
+          <div className="rounded-xl border bg-card text-card-foreground shadow-sm p-6">
+            <div className="flex flex-col space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <h3 className="font-semibold leading-none tracking-tight">Meta de Receita (MRR)</h3>
+                  <p className="text-sm text-muted-foreground">Progresso em relação ao objetivo anual.</p>
+                </div>
+                <Target className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div className="pt-4 space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium">{formatCurrency(current.mrr)}</span>
+                  <span className="text-muted-foreground">{((current.mrr / settings.mrr_goal) * 100).toFixed(1)}%</span>
+                  <span className="font-medium text-muted-foreground">Meta: {formatCurrency(settings.mrr_goal)}</span>
+                </div>
+                <div className="h-3 w-full overflow-hidden rounded-full bg-secondary">
+                  <div
+                    className="h-full bg-primary transition-all duration-500 ease-in-out"
+                    style={{ width: `${Math.min(((current.mrr / settings.mrr_goal) * 100), 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Main Charts Row */}

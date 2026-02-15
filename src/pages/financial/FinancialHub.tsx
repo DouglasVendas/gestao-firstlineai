@@ -4,6 +4,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DreContent } from "@/components/financial/DreContent";
 import { CashflowContent } from "@/components/financial/CashflowContent";
 import { ValuationContent } from "@/components/financial/ValuationContent";
+import { ReceivablesContent } from "@/components/financial/ReceivablesContent";
+import { FixedCostsContent } from "@/components/costs/FixedCostsContent";
+import { VariableCostsContent } from "@/components/costs/VariableCostsContent";
 import { DataImportModal } from "@/components/financial/DataImportModal";
 import { useFinancialData } from "@/contexts/FinancialContext";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -26,13 +29,13 @@ export default function FinancialHub() {
     return (
         <AppLayout
             title="Hub Financeiro"
-            subtitle="Gestão centralizada de resultados, caixa e valuation"
+            subtitle="Centralizada de resultados, caixa, e gestão de SaaS"
         >
             <div className="space-y-8 animate-in fade-in duration-500">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
                         <h1 className="text-3xl font-bold tracking-tight">Financeiro</h1>
-                        <p className="text-muted-foreground">Gestão completa do fluxo de caixa e DRE.</p>
+                        <p className="text-muted-foreground p-1">Gestão completa "Quote-to-Cash": Receita, Custos e Resultados.</p>
                     </div>
                     <div className="flex items-center gap-4">
                         <DataImportModal />
@@ -67,11 +70,15 @@ export default function FinancialHub() {
                 </div>
 
                 <Tabs defaultValue="dre" className="space-y-6">
-                    <TabsList className="grid w-full grid-cols-3 lg:w-[400px]">
-                        <TabsTrigger value="dre">DRE Gerencial</TabsTrigger>
-                        <TabsTrigger value="cashflow">Fluxo de Caixa</TabsTrigger>
-                        <TabsTrigger value="valuation">Valuation</TabsTrigger>
-                    </TabsList>
+                    <div className="w-full overflow-x-auto pb-2">
+                        <TabsList className="grid w-full min-w-[600px] grid-cols-5 lg:w-[800px]">
+                            <TabsTrigger value="dre">DRE Gerencial</TabsTrigger>
+                            <TabsTrigger value="cashflow">Fluxo de Caixa</TabsTrigger>
+                            <TabsTrigger value="receivables">Recebimentos</TabsTrigger>
+                            <TabsTrigger value="costs">Custos e Despesas</TabsTrigger>
+                            <TabsTrigger value="valuation">Valuation</TabsTrigger>
+                        </TabsList>
+                    </div>
 
                     <TabsContent value="dre">
                         <DreContent />
@@ -79,6 +86,25 @@ export default function FinancialHub() {
 
                     <TabsContent value="cashflow">
                         <CashflowContent />
+                    </TabsContent>
+
+                    <TabsContent value="receivables">
+                        <ReceivablesContent />
+                    </TabsContent>
+
+                    <TabsContent value="costs">
+                        <Tabs defaultValue="fixed" className="space-y-4">
+                            <TabsList className="w-[400px]">
+                                <TabsTrigger value="fixed" className="w-[200px]">Custos Fixos</TabsTrigger>
+                                <TabsTrigger value="variable" className="w-[200px]">Custos Variáveis</TabsTrigger>
+                            </TabsList>
+                            <TabsContent value="fixed">
+                                <FixedCostsContent />
+                            </TabsContent>
+                            <TabsContent value="variable">
+                                <VariableCostsContent />
+                            </TabsContent>
+                        </Tabs>
                     </TabsContent>
 
                     <TabsContent value="valuation">

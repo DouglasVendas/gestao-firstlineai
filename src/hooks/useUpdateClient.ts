@@ -8,6 +8,8 @@ interface UpdateClientData {
   status?: string;
   mrr?: number;
   plan_id?: string | null;
+  billing_cycle?: 'monthly' | 'bimonthly' | 'quarterly' | 'semiannual' | 'yearly';
+  products?: string[];
   churn_date?: string | null;
   churn_reason?: string | null;
   voluntary?: boolean | null;

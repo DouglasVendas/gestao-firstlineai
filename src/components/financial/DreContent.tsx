@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { ptBR } from "date-fns/locale";
-import { format } from "date-fns";
+import { format, isAfter, endOfMonth, startOfMonth } from "date-fns";
+import { calculateProjectedRevenue } from "@/utils/projections";
 
 interface DRELine {
     label: string;
@@ -25,7 +26,7 @@ interface DRELine {
 }
 
 export function DreContent() {
-    const { invoices, fixedCosts, variableCosts, selectedMonth, setSelectedMonth, isLoading: isLoadingData } = useFinancialData();
+    const { invoices, fixedCosts, variableCosts, selectedMonth, setSelectedMonth, isLoading: isLoadingData, clients } = useFinancialData();
 
     const selectedMonthStr = useMemo(() => {
         return format(selectedMonth, 'yyyy-MM');
@@ -34,7 +35,7 @@ export function DreContent() {
     // --- Calculations ---
 
     // 1. Gross Revenue (Receita Bruta) - Paid Invoices in the selected month
-    const receitaBruta = useMemo(() => {
+    const receitaRealizada = useMemo(() => {
         if (!invoices) return 0;
         return invoices
             .filter(inv => {
@@ -43,6 +44,39 @@ export function DreContent() {
             })
             .reduce((sum, inv) => sum + (inv.value || 0), 0);
     }, [invoices, selectedMonthStr]);
+
+    // 1.1 Projected Revenue (from Contracts)
+    const receitaProjetada = useMemo(() => {
+        if (!clients || !Array.isArray(clients)) return 0;
+        try {
+            return calculateProjectedRevenue(clients, selectedMonth);
+        } catch (error) {
+            console.error("Error calculating projected revenue:", error);
+            return 0;
+        }
+    }, [clients, selectedMonth]);
+
+    // 1.2 Final Gross Revenue (Hybrid)
+    const receitaBruta = useMemo(() => {
+        const today = new Date();
+        const isFuture = isAfter(startOfMonth(selectedMonth), endOfMonth(today));
+        const isCurrent = format(selectedMonth, 'yyyy-MM') === format(today, 'yyyy-MM');
+
+        // If future, use projected.
+        // If current, use projected (Forecast view) or Max? 
+        // User asked to "feed projected revenue". 
+        // For DRE Projection, usually we want to see the potential.
+        if (isFuture) {
+            return receitaProjetada;
+        }
+        // For current/past, we usually show realized. 
+        // But if current month realized is low (start of month), projected might be useful context.
+        // For now, let's stick to Realized for current/past to be accurate to "Accounting" DRE.
+        // Or if the user wants "Projected DRE", maybe we should show projected if realized is 0?
+        // Let's stick to Realized for now to avoid confusion, unless it's strictly future.
+        return receitaRealizada;
+    }, [receitaProjetada, receitaRealizada, selectedMonth]);
+
 
     // 2. Variable Costs & Taxes
     const currentVariableCosts = useMemo(() => {

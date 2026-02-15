@@ -65,6 +65,8 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_deal_activities_deal ON public.deal_activities(deal_id);
 CREATE INDEX IF NOT EXISTS idx_deal_activities_scheduled ON public.deal_activities(scheduled_at) WHERE is_completed = false;
 
+ALTER TABLE public.deal_activities ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
 -- ┌─────────────────────────────────────────────────┐
 -- │ 3. TABELA DE TAGS                               │
 -- └─────────────────────────────────────────────────┘

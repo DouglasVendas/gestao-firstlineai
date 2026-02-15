@@ -39,6 +39,8 @@ const formSchema = z.object({
   contract_duration: z.coerce.number().min(1).default(12),
   status: z.string(),
   plan_id: z.string().optional(),
+  billing_cycle: z.enum(["monthly", "bimonthly", "quarterly", "semiannual", "yearly"]).default("monthly"),
+  products: z.array(z.string()).default(["CRM"]),
 });
 
 interface EditClientModalProps {
@@ -54,7 +56,7 @@ export function EditClientModal({ client, open, onOpenChange }: EditClientModalP
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
-    defaultValues: { name: "", email: "", mrr: 0, contract_duration: 12, status: "active", plan_id: "" },
+    defaultValues: { name: "", email: "", mrr: 0, contract_duration: 12, status: "active", plan_id: "", billing_cycle: "monthly", products: ["CRM"] },
   });
 
   useEffect(() => {
@@ -66,6 +68,8 @@ export function EditClientModal({ client, open, onOpenChange }: EditClientModalP
         contract_duration: client.contract_duration || 12,
         status: client.status,
         plan_id: client.plan_id || "",
+        billing_cycle: client.billing_cycle || "monthly",
+        products: client.products || ["CRM"],
       });
     }
   }, [client, form]);
@@ -82,6 +86,8 @@ export function EditClientModal({ client, open, onOpenChange }: EditClientModalP
         contract_duration: values.contract_duration,
         status: values.status,
         plan_id: values.plan_id || null,
+        billing_cycle: values.billing_cycle,
+        products: values.products,
       },
       {
         onSuccess: () => {
@@ -181,6 +187,31 @@ export function EditClientModal({ client, open, onOpenChange }: EditClientModalP
                   </FormItem>
                 )}
               />
+
+              <FormField
+                control={form.control}
+                name="billing_cycle"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Ciclo de Cobrança</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="monthly">Mensal</SelectItem>
+                        <SelectItem value="bimonthly">Bimestral</SelectItem>
+                        <SelectItem value="quarterly">Trimestral</SelectItem>
+                        <SelectItem value="semiannual">Semestral</SelectItem>
+                        <SelectItem value="yearly">Anual</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </div>
 
             <FormField
@@ -203,6 +234,123 @@ export function EditClientModal({ client, open, onOpenChange }: EditClientModalP
                       ))}
                     </SelectContent>
                   </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="products"
+              render={() => (
+                <FormItem>
+                  <div className="mb-4 mt-4">
+                    <FormLabel className="text-base">Produtos Contratados</FormLabel>
+                  </div>
+                  <div className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">
+                        CRM (Sales Hub)
+                      </FormLabel>
+                    </div>
+                    <FormControl>
+                      <input
+                        type="checkbox"
+                        className="accent-primary h-5 w-5"
+                        checked={form.watch("products")?.includes("CRM")}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          const current = form.getValues("products") || [];
+                          if (checked) {
+                            form.setValue("products", [...current, "CRM"]);
+                          } else {
+                            form.setValue("products", current.filter((p) => p !== "CRM"));
+                          }
+                        }}
+                      />
+                    </FormControl>
+                  </div>
+                  <div className="flex flex-row items-center justify-between rounded-lg border p-4 mt-2">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">
+                        Auditoria (Audit Hub)
+                      </FormLabel>
+                    </div>
+                    <FormControl>
+                      <input
+                        type="checkbox"
+                        className="accent-primary h-5 w-5"
+                        checked={form.watch("products")?.includes("Auditoria")}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          const current = form.getValues("products") || [];
+                          if (checked) {
+                            form.setValue("products", [...current, "Auditoria"]);
+                          } else {
+                            form.setValue("products", current.filter((p) => p !== "Auditoria"));
+                          }
+                        }}
+                      />
+                    </FormControl>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="products"
+              render={() => (
+                <FormItem>
+                  <div className="mb-4 mt-4">
+                    <FormLabel className="text-base">Produtos Contratados</FormLabel>
+                  </div>
+                  <div className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">
+                        CRM (Sales Hub)
+                      </FormLabel>
+                    </div>
+                    <FormControl>
+                      <input
+                        type="checkbox"
+                        className="accent-primary h-5 w-5"
+                        checked={form.watch("products")?.includes("CRM")}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          const current = form.getValues("products") || [];
+                          if (checked) {
+                            form.setValue("products", [...current, "CRM"]);
+                          } else {
+                            form.setValue("products", current.filter((p) => p !== "CRM"));
+                          }
+                        }}
+                      />
+                    </FormControl>
+                  </div>
+                  <div className="flex flex-row items-center justify-between rounded-lg border p-4 mt-2">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">
+                        Auditoria (Audit Hub)
+                      </FormLabel>
+                    </div>
+                    <FormControl>
+                      <input
+                        type="checkbox"
+                        className="accent-primary h-5 w-5"
+                        checked={form.watch("products")?.includes("Auditoria")}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          const current = form.getValues("products") || [];
+                          if (checked) {
+                            form.setValue("products", [...current, "Auditoria"]);
+                          } else {
+                            form.setValue("products", current.filter((p) => p !== "Auditoria"));
+                          }
+                        }}
+                      />
+                    </FormControl>
+                  </div>
                   <FormMessage />
                 </FormItem>
               )}

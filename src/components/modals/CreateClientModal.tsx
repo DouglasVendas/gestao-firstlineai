@@ -29,6 +29,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { useCreateClient } from "@/hooks/useClients";
+import { usePlans } from "@/hooks/usePlans";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Plus } from "lucide-react";
 
@@ -40,11 +41,15 @@ const formSchema = z.object({
     mrr: z.coerce.number().min(0, "MRR deve ser positivo."),
     contract_duration: z.coerce.number().min(1, "Duração mínima de 1 mês.").default(12),
     start_date: z.string().optional(),
+    billing_cycle: z.enum(["monthly", "bimonthly", "quarterly", "semiannual", "yearly"]).default("monthly"),
+    plan_id: z.string().optional(),
+    products: z.array(z.string()).default(["CRM"]),
 });
 
 export function CreateClientModal() {
     const [open, setOpen] = useState(false);
     const createClient = useCreateClient();
+    const { data: plans } = usePlans();
     const { toast } = useToast();
 
     const form = useForm<z.infer<typeof formSchema>>({
@@ -56,6 +61,9 @@ export function CreateClientModal() {
             mrr: 0,
             contract_duration: 12,
             start_date: new Date().toISOString().split("T")[0],
+            billing_cycle: "monthly",
+            plan_id: "",
+            products: ["CRM"],
         },
     });
 
@@ -68,7 +76,9 @@ export function CreateClientModal() {
                 mrr: values.mrr,
                 contract_duration: values.contract_duration,
                 start_date: values.start_date || null,
-                plan_id: undefined,
+                plan_id: values.plan_id || undefined,
+                billing_cycle: values.billing_cycle,
+                products: values.products,
                 churn_date: null,
                 churn_reason: null,
                 voluntary: null,
@@ -181,6 +191,123 @@ export function CreateClientModal() {
                                 )}
                             />
                         </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <FormField
+                                control={form.control}
+                                name="plan_id"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Plano</FormLabel>
+                                        <Select
+                                            onValueChange={field.onChange}
+                                            defaultValue={field.value}
+                                        >
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Selecione..." />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                {plans?.map((plan) => (
+                                                    <SelectItem key={plan.id} value={plan.id}>
+                                                        {plan.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="billing_cycle"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Ciclo de Cobrança</FormLabel>
+                                        <Select
+                                            onValueChange={field.onChange}
+                                            defaultValue={field.value}
+                                        >
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Selecione..." />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                <SelectItem value="monthly">Mensal</SelectItem>
+                                                <SelectItem value="bimonthly">Bimestral</SelectItem>
+                                                <SelectItem value="quarterly">Trimestral</SelectItem>
+                                                <SelectItem value="semiannual">Semestral</SelectItem>
+                                                <SelectItem value="yearly">Anual</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+
+                        <FormField
+                            control={form.control}
+                            name="products"
+                            render={() => (
+                                <FormItem>
+                                    <div className="mb-4">
+                                        <FormLabel className="text-base">Produtos Contratados</FormLabel>
+                                    </div>
+                                    <div className="flex flex-row items-center justify-between rounded-lg border p-4">
+                                        <div className="space-y-0.5">
+                                            <FormLabel className="text-base">
+                                                CRM (Sales Hub)
+                                            </FormLabel>
+                                        </div>
+                                        <FormControl>
+                                            <input
+                                                type="checkbox"
+                                                className="accent-primary h-5 w-5"
+                                                checked={form.watch("products")?.includes("CRM")}
+                                                onChange={(e) => {
+                                                    const checked = e.target.checked;
+                                                    const current = form.getValues("products") || [];
+                                                    if (checked) {
+                                                        form.setValue("products", [...current, "CRM"]);
+                                                    } else {
+                                                        form.setValue("products", current.filter((p) => p !== "CRM"));
+                                                    }
+                                                }}
+                                            />
+                                        </FormControl>
+                                    </div>
+                                    <div className="flex flex-row items-center justify-between rounded-lg border p-4 mt-2">
+                                        <div className="space-y-0.5">
+                                            <FormLabel className="text-base">
+                                                Auditoria (Audit Hub)
+                                            </FormLabel>
+                                        </div>
+                                        <FormControl>
+                                            <input
+                                                type="checkbox"
+                                                className="accent-primary h-5 w-5"
+                                                checked={form.watch("products")?.includes("Auditoria")}
+                                                onChange={(e) => {
+                                                    const checked = e.target.checked;
+                                                    const current = form.getValues("products") || [];
+                                                    if (checked) {
+                                                        form.setValue("products", [...current, "Auditoria"]);
+                                                    } else {
+                                                        form.setValue("products", current.filter((p) => p !== "Auditoria"));
+                                                    }
+                                                }}
+                                            />
+                                        </FormControl>
+                                    </div>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
 
                         <div className="grid grid-cols-2 gap-4">
                             <FormField

@@ -14,6 +14,8 @@ export interface Client {
         price_monthly: number;
         price_yearly: number;
     } | null;
+    billing_cycle: 'monthly' | 'bimonthly' | 'quarterly' | 'semiannual' | 'yearly' | null;
+    products: string[] | null;
     created_at: string;
     churn_date: string | null;
     churn_reason: string | null;

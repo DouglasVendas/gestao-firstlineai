@@ -27,12 +27,28 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Search, Filter, Download, MoreHorizontal, Edit, UserX, Trash2, Loader2, Info } from "lucide-react";
-import { Client } from "@/hooks/useClients";
+import { Client } from "@/hooks/useClients"; // useClients exporta Client interface
 import { useUpdateClient, useDeleteClient } from "@/hooks/useUpdateClient";
 import { ClientStatusBadge } from "@/components/clients/ClientStatusBadge";
 import { CreateClientModal } from "@/components/modals/CreateClientModal";
 import { EditClientModal } from "@/components/modals/EditClientModal";
 import { ClientDetailsModal } from "@/components/modals/ClientDetailsModal";
+import { useFinancialData } from "@/contexts/FinancialContext";
+import { useToast } from "@/hooks/use-toast"; // or components/ui/use-toast
+import { startOfMonth, endOfMonth, parseISO, format } from "date-fns";
+import { cn } from "@/lib/utils";
+
+// Helper functions (could be moved to utils)
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(value);
+};
+
+const formatDate = (dateString: string) => {
+  return format(parseISO(dateString), 'dd/MM/yyyy');
+};
 
 export default function Clients() {
   const { clients, invoices, selectedMonth, isLoading } = useFinancialData();
@@ -96,9 +112,28 @@ export default function Clients() {
       const matchesSearch = client.name.toLowerCase().includes(searchTerm.toLowerCase());
 
       let matchesStatus = true;
+
+      // Calculate renewal status for filtering
+      let isRenewing = false;
+      if (client.start_date) {
+        const startDate = parseISO(client.start_date);
+        const duration = client.contract_duration || 12;
+        const endDate = new Date(startDate);
+        endDate.setMonth(endDate.getMonth() + duration);
+
+        const today = new Date();
+        // Calculate difference in months: (YearDiff * 12) + MonthDiff
+        const monthsToRenew = (endDate.getFullYear() - today.getFullYear()) * 12 + (endDate.getMonth() - today.getMonth());
+
+        // Logic: 0 (current month) or 1 (next month)
+        isRenewing = monthsToRenew >= 0 && monthsToRenew <= 1;
+      }
+
       if (statusFilter === "all") matchesStatus = true;
       else if (statusFilter === "active") matchesStatus = client.calculatedStatus === "active" || client.calculatedStatus === "trial";
       else if (statusFilter === "churned") matchesStatus = client.calculatedStatus === "churned" || client.calculatedStatus === "churned_past";
+      else if (statusFilter === "renewing") matchesStatus = isRenewing;
+      else if (statusFilter === "overdue") matchesStatus = client.status === "churned"; // Proxy for 'Inadimplentes' based on user context
       else matchesStatus = client.calculatedStatus === statusFilter;
 
       // Optional: hide 'future' clients or 'churned_past' if generic view?
@@ -240,6 +275,68 @@ export default function Clients() {
         </div>
       </div>
 
+      <div className="mb-6">
+        <div className="border-b">
+          <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+            {['Todos', 'Ativos', 'A Renovar', 'Inadimplentes'].map((tab) => {
+              const isSelected = (statusFilter === 'all' && tab === 'Todos') ||
+                (statusFilter === 'active' && tab === 'Ativos') ||
+                (statusFilter === 'renewing' && tab === 'A Renovar') ||
+                (statusFilter === 'overdue' && tab === 'Inadimplentes');
+
+              let count = 0;
+              if (tab === 'Todos') count = filteredClients.length; // Shows current view count
+              if (tab === 'Ativos') {
+                count = clients?.filter(c => c.status === 'active' || c.status === 'trial').length || 0;
+              }
+              if (tab === 'A Renovar') {
+                count = clients?.filter(c => {
+                  if (!c.start_date) return false;
+                  const startDate = parseISO(c.start_date);
+                  const duration = c.contract_duration || 12;
+                  const endDate = new Date(startDate);
+                  endDate.setMonth(endDate.getMonth() + duration);
+
+                  const today = new Date();
+                  const months = (endDate.getFullYear() - today.getFullYear()) * 12 + (endDate.getMonth() - today.getMonth());
+                  return months >= 0 && months <= 1;
+                }).length || 0;
+              }
+              if (tab === 'Inadimplentes') {
+                // Using 'churned' as proxy for now or specific status if added
+                count = clients?.filter(c => c.status === 'churned').length || 0;
+              }
+
+
+              return (
+                <button
+                  key={tab}
+                  onClick={() => {
+                    if (tab === 'Todos') setStatusFilter('all');
+                    if (tab === 'Ativos') setStatusFilter('active');
+                    if (tab === 'A Renovar') setStatusFilter('renewing');
+                    if (tab === 'Inadimplentes') setStatusFilter('overdue');
+                  }}
+                  className={cn(
+                    isSelected
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted-foreground hover:border-gray-300 hover:text-foreground',
+                    'whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium'
+                  )}
+                >
+                  {tab}
+                  {tab !== 'Todos' && <span className={cn(
+                    "ml-2 py-0.5 px-2.5 rounded-full text-xs font-medium md:inline-block",
+                    tab === 'Ativos' ? 'bg-green-100 text-green-800' :
+                      tab === 'A Renovar' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'
+                  )}>{count}</span>}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      </div>
+
       {/* Stats Summary */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="metric-card">
@@ -268,10 +365,11 @@ export default function Clients() {
               <thead className="bg-muted/50">
                 <tr>
                   <th>Cliente</th>
-                  <th>Plano</th>
+                  <th>Plano & Ciclo</th>
+                  <th>Produtos</th>
                   <th>MRR</th>
-                  <th>Status (Calculado)</th>
-                  <th>Início</th>
+                  <th>Status</th>
+                  <th>Contrato & Renovação</th>
                   <th></th>
                 </tr>
               </thead>
@@ -280,13 +378,119 @@ export default function Clients() {
                   return (
                     <tr key={client.id}>
                       <td className="font-medium">{client.name}</td>
-                      <td>{client.plan?.name || "-"}</td>
+                      <td className="py-3">
+                        <div className="flex flex-col gap-1">
+                          <span className="font-medium">{client.plan?.name || "Sem Plano"}</span>
+                          {client.billing_cycle && (
+                            <span className={cn(
+                              "inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium w-fit border",
+                              client.billing_cycle === 'monthly' && "bg-blue-50 text-blue-700 border-blue-200",
+                              client.billing_cycle === 'yearly' && "bg-purple-50 text-purple-700 border-purple-200",
+                              client.billing_cycle === 'bimonthly' && "bg-teal-50 text-teal-700 border-teal-200",
+                              (client.billing_cycle === 'quarterly' || client.billing_cycle === 'semiannual') && "bg-orange-50 text-orange-700 border-orange-200"
+                            )}>
+                              {client.billing_cycle === 'monthly' && "Mensal"}
+                              {client.billing_cycle === 'bimonthly' && "Bimestral"}
+                              {client.billing_cycle === 'quarterly' && "Trimestral"}
+                              {client.billing_cycle === 'semiannual' && "Semestral"}
+                              {client.billing_cycle === 'yearly' && "Anual"}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="flex flex-wrap gap-1">
+                          {client.products?.map((prod) => (
+                            <span key={prod} className={cn(
+                              "inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium border",
+                              prod === 'CRM' ? "bg-indigo-50 text-indigo-700 border-indigo-200" : "bg-violet-50 text-violet-700 border-violet-200"
+                            )}>
+                              {prod}
+                            </span>
+                          ))}
+                          {!client.products?.length && <span className="text-xs text-muted-foreground">-</span>}
+                        </div>
+                      </td>
                       <td className="font-mono">{formatCurrency(client.mrr)}</td>
                       <td>
                         <ClientStatusBadge status={client.calculatedStatus || client.status} />
                       </td>
-                      <td className="font-mono text-muted-foreground">
-                        {client.start_date ? formatDate(client.start_date) : "-"}
+                      <td>
+                        {(() => {
+                          if (!client.start_date && !client.created_at) return <span className="text-muted-foreground">-</span>;
+
+                          const startDate = parseISO(client.start_date || client.created_at);
+                          let endDate = new Date();
+                          let monthsToRenew = 0;
+                          let isMonthlyNoContract = false;
+
+                          if (client.status === 'churned' && client.churn_date) {
+                            endDate = parseISO(client.churn_date);
+                            // Calculate months from today to churn date (likely negative)
+                            const today = new Date();
+                            monthsToRenew = (endDate.getFullYear() - today.getFullYear()) * 12 + (endDate.getMonth() - today.getMonth());
+                          } else if (client.billing_cycle === 'monthly' && (!client.contract_duration || client.contract_duration < 12)) {
+                            // Monthly without annual contract
+                            isMonthlyNoContract = true;
+                            // For display purposes, user wants "1 mês"
+                            // We set endDate to implicit next month or just handle message directly
+                            const today = new Date();
+                            endDate = new Date(today);
+                            endDate.setMonth(today.getMonth() + 1); // Mock end date = next month
+                            monthsToRenew = 1;
+                          } else {
+                            // Standard contract logic
+                            const duration = client.contract_duration || 12; // Default 12 if not specified and not caught above
+                            endDate = new Date(startDate);
+                            endDate.setMonth(endDate.getMonth() + duration);
+
+                            const today = new Date();
+                            monthsToRenew = (endDate.getFullYear() - today.getFullYear()) * 12 + (endDate.getMonth() - today.getMonth());
+                          }
+
+                          // UX Logic (User Request):
+                          // > 2 months: Green (Normal)
+                          // 1-2 months: Orange (Warning 60-30 days)
+                          // <= 0 months: Red (Critical < 30 days)
+
+                          let badgeColor = "bg-green-100 text-green-800 border-green-200";
+                          let message = "";
+
+                          if (client.status === 'churned') {
+                            badgeColor = "bg-red-100 text-red-800 border-red-200";
+                            message = "Cancelado";
+                          } else if (isMonthlyNoContract) {
+                            // "informar 1 mês"
+                            // 1 month falls into Orange (1-2 months)
+                            badgeColor = "bg-orange-100 text-orange-800 border-orange-200";
+                            message = "1 mês (Mensal)";
+                          } else {
+                            if (monthsToRenew > 2) {
+                              badgeColor = "bg-green-100 text-green-800 border-green-200";
+                              message = `${monthsToRenew} meses`;
+                            } else if (monthsToRenew >= 1) {
+                              badgeColor = "bg-orange-100 text-orange-800 border-orange-200";
+                              message = `${monthsToRenew} meses`;
+                            } else {
+                              // 0 or negative
+                              badgeColor = "bg-red-100 text-red-800 border-red-200";
+                              if (monthsToRenew === 0) message = "Este mês";
+                              else message = `Vencido (${Math.abs(monthsToRenew)} m)`;
+                            }
+                          }
+
+                          return (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-xs text-muted-foreground">Fim: {format(endDate, 'dd/MM/yyyy')}</span>
+                              <span className={cn(
+                                "inline-flex items-center justify-center rounded-md px-3 py-1 text-sm font-bold border shadow-sm w-fit",
+                                badgeColor
+                              )}>
+                                <span className="text-base">{message}</span>
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td>
                         <DropdownMenu>

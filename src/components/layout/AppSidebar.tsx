@@ -21,8 +21,21 @@ import {
   DollarSign,
   Gauge,
   Calculator,
+  ChevronsUpDown,
+  Plus,
+  Check
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useSettings } from "@/hooks/useSettings";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 
 interface NavItem {
   title: string;
@@ -38,37 +51,24 @@ interface NavGroup {
 
 const navigation: NavGroup[] = [
   {
-    title: "Visão Geral",
+    title: "Cockpit",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Sistema Operacional", href: "/gre", icon: Gauge, badge: "Novo" },
     ],
   },
   {
-    title: "Estratégia & Gestão",
+    title: "Gestão",
     items: [
       { title: "Hub Financeiro", href: "/financial", icon: BarChart3 },
-      { title: "Gestão de Custos", href: "/costs", icon: Wallet },
       { title: "Hub Comercial", href: "/commercial", icon: TrendingUp },
       { title: "Hub Jurídico", href: "/legal", icon: Scale },
-    ],
-  },
-  {
-    title: "Operacional",
-    items: [
       { title: "Clientes", href: "/clients", icon: Users },
-      { title: "Recebimentos", href: "/receivables", icon: Receipt },
-    ],
-  },
-  {
-    title: "Sistema",
-    items: [
-      { title: "Importação de Dados", href: "/import-data", icon: Import },
     ],
   },
 ];
 
 export function AppSidebar() {
+  const { settings } = useSettings();
   const location = useLocation();
   const [expandedGroups, setExpandedGroups] = useState<string[]>(
     navigation.map((g) => g.title)
@@ -84,15 +84,47 @@ export function AppSidebar() {
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-sidebar-border bg-sidebar">
-      {/* Logo */}
-      <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
-          <DollarSign className="h-5 w-5 text-primary-foreground" />
-        </div>
-        <div>
-          <h1 className="text-lg font-semibold text-foreground">SaaS Metrics</h1>
-          <p className="text-xs text-muted-foreground">Financial Hub</p>
-        </div>
+      {/* Logo & Workspace Switcher */}
+      <div className="flex h-16 items-center border-b border-sidebar-border px-4">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" className="w-full justify-start gap-3 px-2 hover:bg-sidebar-accent/50">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                {settings.logo_url ? (
+                  <img src={settings.logo_url} alt={settings.company_name} className="h-9 w-9 rounded-lg object-cover" />
+                ) : (
+                  <Building2 className="h-5 w-5" />
+                )}
+              </div>
+              <div className="flex flex-1 flex-col items-start overflow-hidden">
+                <span className="truncate text-sm font-semibold text-foreground">
+                  {settings.company_name || "SaaS Compass"}
+                </span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {settings.business_model === 'B2B_SERVICE' ? 'Service Hub' : 'Financial Hub'}
+                </span>
+              </div>
+              <ChevronsUpDown className="ml-auto h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-[240px]" align="start">
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Workspaces</DropdownMenuLabel>
+            <DropdownMenuItem className="gap-2 bg-accent/50">
+              <div className="flex h-6 w-6 items-center justify-center rounded-sm border bg-background">
+                <Building2 className="h-4 w-4" />
+              </div>
+              {settings.company_name}
+              <Check className="ml-auto h-4 w-4" />
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="gap-2">
+              <div className="flex h-6 w-6 items-center justify-center rounded-sm border border-dashed">
+                <Plus className="h-4 w-4" />
+              </div>
+              Criar nova empresa
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Navigation */}
