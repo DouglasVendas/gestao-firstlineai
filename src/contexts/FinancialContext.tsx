@@ -7,7 +7,8 @@ import { FixedCost } from "@/hooks/useFixedCosts";
 import { VariableCost } from "@/hooks/useVariableCosts";
 import { Transaction } from "@/hooks/useTransactions";
 import { financialConfig } from "@/config/financialConfig";
-import { eachMonthOfInterval, format, isSameMonth } from "date-fns";
+import { eachMonthOfInterval, format, isSameMonth, startOfMonth, endOfMonth } from "date-fns";
+import { DateRange } from "react-day-picker";
 
 interface FinancialContextType {
     clients: Client[];
@@ -18,12 +19,18 @@ interface FinancialContextType {
     isLoading: boolean;
     selectedMonth: Date;
     setSelectedMonth: (date: Date) => void;
+    dateRange: DateRange | undefined;
+    setDateRange: (range: DateRange | undefined) => void;
 }
 
 const FinancialContext = createContext<FinancialContextType | undefined>(undefined);
 
 export function FinancialProvider({ children }: { children: ReactNode }) {
     const [selectedMonth, setSelectedMonth] = useState<Date>(new Date());
+    const [dateRange, setDateRange] = useState<DateRange | undefined>({
+        from: startOfMonth(new Date()),
+        to: endOfMonth(new Date())
+    });
     const queryClient = useQueryClient();
 
     const { data: clients, isLoading: loadingClients } = useQuery({
@@ -151,8 +158,6 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
             nextMonth.setDate(20);
 
             const dueDateStr = format(nextMonth, 'yyyy-MM-dd');
-            const isPastDue = nextMonth < new Date(); // If today is past the 20th, assume paid?
-
             taxes.push({
                 id: `tax-${format(month, 'yyyy-MM')}`,
                 description: `Imposto sobre Receita (${format(month, 'MMM/yy')})`,
@@ -160,7 +165,7 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
                 amount: taxAmount,
                 date: dueDateStr,
                 month: format(nextMonth, 'yyyy-MM'), // The month it belongs to in terms of Cashflow (Payment)
-                status: isPastDue ? 'paid' : 'pending',
+                status: 'pending',  // Impostos sempre devem ser gerados como pendentes até pagamento real
                 created_at: new Date().toISOString()
             } as unknown as VariableCost);
         });
@@ -195,8 +200,10 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
         transactions: transactions || [],
         isLoading,
         selectedMonth,
-        setSelectedMonth
-    }), [clients, invoices, allFixedCosts, allVariableCosts, transactions, isLoading, selectedMonth]);
+        setSelectedMonth,
+        dateRange,
+        setDateRange
+    }), [clients, invoices, allFixedCosts, allVariableCosts, transactions, isLoading, selectedMonth, dateRange]);
 
     return (
         <FinancialContext.Provider value={value}>

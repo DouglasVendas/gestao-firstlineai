@@ -19,12 +19,13 @@ import {
 import { useFinancialData } from "@/contexts/FinancialContext";
 import { cn } from "@/lib/utils";
 import { CreateTransactionModal } from "@/components/modals/CreateTransactionModal";
+import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
+    Accordion,
+    AccordionContent,
+    AccordionItem,
+    AccordionTrigger
+} from "@/components/ui/accordion";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -56,7 +57,7 @@ const formatDate = (date: string) => {
 };
 
 export function CashflowContent() {
-    const { invoices, fixedCosts, variableCosts, selectedMonth, setSelectedMonth, isLoading } = useFinancialData();
+    const { invoices, fixedCosts, variableCosts, transactions, selectedMonth, setSelectedMonth, dateRange, setDateRange, isLoading } = useFinancialData();
 
     const selectedMonthStr = useMemo(() => format(selectedMonth, 'yyyy-MM'), [selectedMonth]);
 
@@ -105,27 +106,149 @@ export function CashflowContent() {
                     amount: vc.amount,
                     type: 'saida',
                     date: `${vc.month}-01`,
-                    status: 'completed'
+                    status: (vc as any).status === 'pending' ? 'pending' : 'completed'
+                });
+            }
+        });
+
+        // 4. Transactions (Gerais como C6 Bank, mas NÃO Vendas de Planos, pois estas vêm de Invoices)
+        transactions.forEach(t => {
+            const isVendaOrPlano = t.category === "Venda" || t.category === "Plano" || (t.description || "").toLowerCase().startsWith("venda");
+
+            if (!isVendaOrPlano) {
+                items.push({
+                    id: `tx-${t.id}`,
+                    description: t.description || "Sem descrição",
+                    category: t.category || "Outros",
+                    amount: t.amount,
+                    type: (t.type === 'income' || t.type === 'entrada') ? 'entrada' : 'saida',
+                    date: t.date,
+                    status: t.status === 'completed' ? 'completed' : 'pending'
                 });
             }
         });
 
         return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }, [invoices, fixedCosts, variableCosts, isLoading]);
+    }, [invoices, fixedCosts, variableCosts, transactions, isLoading]);
 
     const currentMonthItems = useMemo(() => {
-        return cashflowItems.filter(item => item.date.startsWith(selectedMonthStr));
-    }, [cashflowItems, selectedMonthStr]);
+        if (!dateRange?.from) return [];
+
+        const fromStr = format(dateRange.from, 'yyyy-MM-dd');
+        const toStr = dateRange.to ? format(dateRange.to, 'yyyy-MM-dd') : fromStr;
+
+        return cashflowItems.filter(item => {
+            if (!item.date) return false;
+            const itemDateStr = item.date.substring(0, 10);
+            return itemDateStr >= fromStr && itemDateStr <= toStr;
+        });
+    }, [cashflowItems, dateRange]);
 
     const stats = useMemo(() => {
-        const revenue = currentMonthItems.filter(i => i.type === 'entrada').reduce((acc, i) => acc + i.amount, 0);
+        const incomeItems = currentMonthItems.filter(i => i.type === 'entrada');
+
+        // A Receita Operacional (Gross Revenue) desconsidera resgates de Fundos/CDB
+        const revenue = incomeItems
+            .filter(i => !(i.category || "").toLowerCase().includes("investimento"))
+            .reduce((acc, i) => acc + i.amount, 0);
+
+        // O Valor de Resgate retornado para a conta (Não é Faturamento)
+        const investmentReturn = incomeItems
+            .filter(i => (i.category || "").toLowerCase().includes("investimento"))
+            .reduce((acc, i) => acc + i.amount, 0);
+
         const expenses = currentMonthItems.filter(i => i.type === 'saida').reduce((acc, i) => acc + i.amount, 0);
+
         return {
             revenue,
+            investmentReturn,
             expenses,
-            balance: revenue - expenses
+            balance: (revenue + investmentReturn) - expenses
         };
     }, [currentMonthItems]);
+
+    const groupedItems = useMemo(() => {
+        const isVenda = (i: CashflowItem) => (i.category || "").toLowerCase() === "venda" || (i.category || "").toLowerCase() === "plano" || (i.description || "").toLowerCase().startsWith("venda");
+
+        const vendas = currentMonthItems.filter(isVenda);
+        const impostos = currentMonthItems.filter(i => (i.category || "").toLowerCase().includes("imposto") && !isVenda(i));
+        const proLabore = currentMonthItems.filter(i => ((i.category || "").toLowerCase().includes("pro-labore") || (i.category || "").toLowerCase().includes("pró-labore")) && !isVenda(i));
+        const investimento = currentMonthItems.filter(i => (i.category || "").toLowerCase().includes("investimento") && !isVenda(i));
+
+        const isFatura = (i: CashflowItem) => (i.category || "").toLowerCase().includes("cartão") || (i.description || "").toLowerCase().includes("cartao") || (i.description || "").toLowerCase().includes("fatura");
+
+        const faturas = currentMonthItems.filter(i =>
+            ((i.description || "").toLowerCase().includes("c6 bank") || (i.description || "").toLowerCase().includes("c6")) &&
+            isFatura(i) &&
+            !isVenda(i)
+        );
+
+        const santander = currentMonthItems.filter(i =>
+            (i.description || "").toLowerCase().includes("santander") &&
+            isFatura(i) &&
+            !isVenda(i)
+        );
+
+        // Outros são aqueles que não entraram nas categorias acima
+        const outros = currentMonthItems.filter(i =>
+            !vendas.includes(i) &&
+            !impostos.includes(i) &&
+            !faturas.includes(i) &&
+            !santander.includes(i) &&
+            !proLabore.includes(i) &&
+            !investimento.includes(i)
+        );
+
+        return { vendas, impostos, faturas, santander, proLabore, investimento, outros };
+    }, [currentMonthItems]);
+
+    const sumCategory = (items: CashflowItem[]) => items.reduce((acc, i) => acc + i.amount, 0);
+
+    const renderTransactionItem = (transaction: CashflowItem) => (
+        <div
+            key={transaction.id}
+            className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-muted/50 transition-colors mb-2"
+        >
+            <div className="flex items-center gap-4">
+                <div
+                    className={cn(
+                        "flex h-8 w-8 items-center justify-center rounded-full",
+                        transaction.type === "entrada"
+                            ? "bg-success/10 text-success"
+                            : "bg-destructive/10 text-destructive"
+                    )}
+                >
+                    {transaction.type === "entrada" ? (
+                        <TrendingUp className="h-4 w-4" />
+                    ) : (
+                        <TrendingDown className="h-4 w-4" />
+                    )}
+                </div>
+                <div>
+                    <p className="font-medium text-sm">{transaction.description}</p>
+                    <p className="text-xs text-muted-foreground">
+                        {transaction.category} • {formatDate(transaction.date)}
+                    </p>
+                </div>
+            </div>
+            <div className="text-right">
+                <p
+                    className={cn(
+                        "font-semibold text-sm",
+                        transaction.type === "entrada"
+                            ? "text-success"
+                            : "text-destructive"
+                    )}
+                >
+                    {transaction.type === "entrada" ? "+" : "-"}{" "}
+                    {formatCurrency(transaction.amount)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                    {transaction.status === "completed" ? "Confirmado" : "Pendente"}
+                </p>
+            </div>
+        </div>
+    );
 
     const chartData = useMemo(() => {
         const map = new Map<string, { month: string, entradas: number, saidas: number, saldo: number }>();
@@ -135,20 +258,37 @@ export function CashflowContent() {
             d.setMonth(d.getMonth() - i);
             const mStr = format(d, 'yyyy-MM');
             map.set(mStr, {
-                month: format(d, 'MMM', { locale: ptBR }),
+                // Utilizando ptBR importado do locale
+                month: format(d, 'MMM/yy', { locale: ptBR }),
                 entradas: 0,
                 saidas: 0,
                 saldo: 0
             });
         }
 
+        let runningBalance = financialConfig.initialCashBalance || 0; // Se houver controle estrito, usar saldo prévio 
+
         cashflowItems.forEach(item => {
+            if (!item.date) return;
             const mStr = item.date.substring(0, 7);
+
+            // Incrementa o runningBalance para TODO o histórico (calculo real de saldo)
+            if (item.type === 'entrada') {
+                runningBalance += item.amount;
+            } else {
+                runningBalance -= item.amount;
+            }
+
             if (map.has(mStr)) {
                 const entry = map.get(mStr)!;
-                if (item.type === 'entrada') entry.entradas += item.amount;
-                else entry.saidas += item.amount;
-                entry.saldo = entry.entradas - entry.saidas;
+                const isInvestment = (item.category || "").toLowerCase().includes("investimento");
+
+                if (item.type === 'entrada') {
+                    if (!isInvestment) entry.entradas += item.amount;
+                } else {
+                    entry.saidas += item.amount;
+                }
+                entry.saldo = runningBalance;
             }
         });
 
@@ -169,29 +309,16 @@ export function CashflowContent() {
             {/* Actions Bar */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
-                    {/* Global Month Selector integration */}
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <Button
-                                variant={"outline"}
-                                className={cn(
-                                    "w-[240px] justify-start text-left font-normal",
-                                    !selectedMonth && "text-muted-foreground"
-                                )}
-                            >
-                                <CalendarIcon className="mr-2 h-4 w-4" />
-                                {selectedMonth ? format(selectedMonth, "MMMM yyyy", { locale: ptBR }) : <span>Selecione uma data</span>}
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                                mode="single"
-                                selected={selectedMonth}
-                                onSelect={(d) => d && setSelectedMonth(d)}
-                                initialFocus
-                            />
-                        </PopoverContent>
-                    </Popover>
+                    {/* Global Date Range Selector integration */}
+                    <DatePickerWithRange
+                        date={dateRange}
+                        onDateChange={(range) => {
+                            setDateRange(range);
+                            if (range?.from) {
+                                setSelectedMonth(range.from);
+                            }
+                        }}
+                    />
 
                     <Button variant="outline">
                         <Download className="mr-2 h-4 w-4" />
@@ -202,7 +329,7 @@ export function CashflowContent() {
             </div>
 
             {/* Metric Cards */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <MetricCard
                     title="Saldo Atual (Caixa)"
                     value={formatCurrency(financialConfig.initialCashBalance)}
@@ -213,20 +340,20 @@ export function CashflowContent() {
                     allowPrivacy={true}
                 />
                 <MetricCard
-                    title="Saldo do Mês"
-                    value={formatCurrency(stats.balance)}
-                    change={0}
-                    icon={DollarSign}
-                    description={`Resultado de ${format(selectedMonth, 'MMMM', { locale: ptBR })}`}
-                    variant={stats.balance >= 0 ? "success" : "danger"}
-                />
-                <MetricCard
-                    title="Entradas"
+                    title="Entradas (Vendas)"
                     value={formatCurrency(stats.revenue)}
                     change={0}
                     icon={TrendingUp}
-                    description="Receitas do período"
+                    description="Faturamento bruto operacional"
                     variant="success"
+                />
+                <MetricCard
+                    title="Resgates de Invest."
+                    value={formatCurrency(stats.investmentReturn)}
+                    change={0}
+                    icon={TrendingUp}
+                    description="Retornos dos Fundos/CDB"
+                    variant="primary"
                 />
                 <MetricCard
                     title="Saídas"
@@ -235,6 +362,14 @@ export function CashflowContent() {
                     icon={TrendingDown}
                     description="Despesas do período"
                     variant="danger"
+                />
+                <MetricCard
+                    title="Saldo do Mês"
+                    value={formatCurrency(stats.balance)}
+                    change={0}
+                    icon={DollarSign}
+                    description="Resultado líquido selecionado"
+                    variant={stats.balance >= 0 ? "success" : "danger"}
                 />
             </div>
 
@@ -311,58 +446,112 @@ export function CashflowContent() {
             {/* Recent Transactions List */}
             <Card>
                 <CardHeader>
-                    <CardTitle className="text-lg">Transações {selectedMonth && `- ${format(selectedMonth, 'MMMM/yyyy', { locale: ptBR })}`}</CardTitle>
+                    <CardTitle className="text-lg">Transações do Período</CardTitle>
                 </CardHeader>
                 <CardContent>
                     <div className="space-y-4 min-h-[400px]">
                         {currentMonthItems.length > 0 ? (
-                            currentMonthItems.map((transaction) => (
-                                <div
-                                    key={transaction.id}
-                                    className="flex items-center justify-between rounded-lg border border-border p-4 hover:bg-muted/50 transition-colors"
-                                >
-                                    <div className="flex items-center gap-4">
-                                        <div
-                                            className={cn(
-                                                "flex h-10 w-10 items-center justify-center rounded-full",
-                                                transaction.type === "entrada"
-                                                    ? "bg-success/10 text-success"
-                                                    : "bg-destructive/10 text-destructive"
-                                            )}
-                                        >
-                                            {transaction.type === "entrada" ? (
-                                                <TrendingUp className="h-5 w-5" />
-                                            ) : (
-                                                <TrendingDown className="h-5 w-5" />
-                                            )}
-                                        </div>
-                                        <div>
-                                            <p className="font-medium">{transaction.description}</p>
-                                            <p className="text-sm text-muted-foreground">
-                                                {transaction.category} • {formatDate(transaction.date)}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <p
-                                            className={cn(
-                                                "font-semibold",
-                                                transaction.type === "entrada"
-                                                    ? "text-success"
-                                                    : "text-destructive"
-                                            )}
-                                        >
-                                            {transaction.type === "entrada" ? "+" : "-"}{" "}
-                                            {formatCurrency(transaction.amount)}
-                                        </p>
-                                        <p className="text-sm text-muted-foreground">
-                                            {transaction.status === "completed" ? "Confirmado" : "Pendente"}
-                                        </p>
-                                    </div>
-                                </div>
-                            ))
+                            <Accordion type="multiple" className="w-full">
+                                {groupedItems.faturas.length > 0 && (
+                                    <AccordionItem value="faturas">
+                                        <AccordionTrigger className="hover:no-underline hover:bg-muted/30 px-4 rounded-md">
+                                            <div className="flex justify-between w-full pr-4">
+                                                <span>Fatura Cartão C6 Bank</span>
+                                                <span className="text-destructive font-medium">{formatCurrency(sumCategory(groupedItems.faturas))}</span>
+                                            </div>
+                                        </AccordionTrigger>
+                                        <AccordionContent className="pt-4 pb-2 px-2">
+                                            {groupedItems.faturas.map(renderTransactionItem)}
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                )}
+
+                                {groupedItems.santander.length > 0 && (
+                                    <AccordionItem value="santander">
+                                        <AccordionTrigger className="hover:no-underline hover:bg-muted/30 px-4 rounded-md">
+                                            <div className="flex justify-between w-full pr-4">
+                                                <span>Fatura Cartão Santander</span>
+                                                <span className="text-destructive font-medium">{formatCurrency(sumCategory(groupedItems.santander))}</span>
+                                            </div>
+                                        </AccordionTrigger>
+                                        <AccordionContent className="pt-4 pb-2 px-2">
+                                            {groupedItems.santander.map(renderTransactionItem)}
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                )}
+
+                                {groupedItems.investimento.length > 0 && (
+                                    <AccordionItem value="investimento">
+                                        <AccordionTrigger className="hover:no-underline hover:bg-muted/30 px-4 rounded-md">
+                                            <div className="flex justify-between w-full pr-4">
+                                                <span>Aplicações e Investimentos</span>
+                                                <span className="text-destructive font-medium">{formatCurrency(sumCategory(groupedItems.investimento))}</span>
+                                            </div>
+                                        </AccordionTrigger>
+                                        <AccordionContent className="pt-4 pb-2 px-2">
+                                            {groupedItems.investimento.map(renderTransactionItem)}
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                )}
+
+                                {groupedItems.vendas.length > 0 && (
+                                    <AccordionItem value="vendas">
+                                        <AccordionTrigger className="hover:no-underline hover:bg-muted/30 px-4 rounded-md">
+                                            <div className="flex justify-between w-full pr-4">
+                                                <span>Vendas</span>
+                                                <span className="text-success font-medium">{formatCurrency(sumCategory(groupedItems.vendas))}</span>
+                                            </div>
+                                        </AccordionTrigger>
+                                        <AccordionContent className="pt-4 pb-2 px-2">
+                                            {groupedItems.vendas.map(renderTransactionItem)}
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                )}
+
+                                {groupedItems.impostos.length > 0 && (
+                                    <AccordionItem value="impostos">
+                                        <AccordionTrigger className="hover:no-underline hover:bg-muted/30 px-4 rounded-md">
+                                            <div className="flex justify-between w-full pr-4">
+                                                <span>Impostos</span>
+                                                <span className="text-destructive font-medium">{formatCurrency(sumCategory(groupedItems.impostos))}</span>
+                                            </div>
+                                        </AccordionTrigger>
+                                        <AccordionContent className="pt-4 pb-2 px-2">
+                                            {groupedItems.impostos.map(renderTransactionItem)}
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                )}
+
+                                {groupedItems.proLabore.length > 0 && (
+                                    <AccordionItem value="prolabore">
+                                        <AccordionTrigger className="hover:no-underline hover:bg-muted/30 px-4 rounded-md">
+                                            <div className="flex justify-between w-full pr-4">
+                                                <span>Pró-Labore</span>
+                                                <span className="text-destructive font-medium">{formatCurrency(sumCategory(groupedItems.proLabore))}</span>
+                                            </div>
+                                        </AccordionTrigger>
+                                        <AccordionContent className="pt-4 pb-2 px-2">
+                                            {groupedItems.proLabore.map(renderTransactionItem)}
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                )}
+
+                                {groupedItems.outros.length > 0 && (
+                                    <AccordionItem value="outros">
+                                        <AccordionTrigger className="hover:no-underline hover:bg-muted/30 px-4 rounded-md">
+                                            <div className="flex justify-between w-full pr-4">
+                                                <span>Outros Custos / Transações</span>
+                                                <span className="text-muted-foreground font-medium">{formatCurrency(sumCategory(groupedItems.outros))}</span>
+                                            </div>
+                                        </AccordionTrigger>
+                                        <AccordionContent className="pt-4 pb-2 px-2">
+                                            {groupedItems.outros.map(renderTransactionItem)}
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                )}
+                            </Accordion>
                         ) : (
-                            <div className="flex h-full items-center justify-center text-muted-foreground">
+                            <div className="flex h-full items-center justify-center text-muted-foreground pt-10">
                                 Nenhuma transação encontrada para este período.
                             </div>
                         )}

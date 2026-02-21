@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { useChatHistory } from '@/hooks/useChatHistory';
 
@@ -22,6 +23,7 @@ export function AIChat() {
     const [isOpen, setIsOpen] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
     const [input, setInput] = useState('');
+    const queryClient = useQueryClient();
 
     // Replace legacy useFinancials with snapshot
     const { current, previous } = useFinancialSnapshot();
@@ -80,7 +82,15 @@ export function AIChat() {
                 };
             }
 
-            const responseText = await generateFinancialResponse(userMsg.content, context);
+            const { text: responseText, dataUpdated } = await generateFinancialResponse(userMsg.content, context);
+
+            if (dataUpdated) {
+                // Se a IA alterou dados, forçar re-fetch em todas as queries principais da tela financeira
+                queryClient.invalidateQueries({ queryKey: ["transactions"] });
+                queryClient.invalidateQueries({ queryKey: ["invoices"] });
+                queryClient.invalidateQueries({ queryKey: ["fixed_costs"] });
+                queryClient.invalidateQueries({ queryKey: ["variable_costs"] });
+            }
 
             // Split into separate bubbles
             const parts = responseText.split('[BREAK]').map(p => p.trim()).filter(p => p);

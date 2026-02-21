@@ -6,7 +6,7 @@ export interface Transaction {
     description: string;
     category: string | null;
     amount: number;
-    type: 'income' | 'expense';
+    type: 'income' | 'expense' | 'entrada' | 'saida';
     status: 'pending' | 'completed' | 'cancelled';
     date: string;
     created_at: string;
