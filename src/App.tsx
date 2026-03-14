@@ -14,6 +14,7 @@ import Budget from "./pages/Budget";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import ImportData from "./pages/ImportData";
+import Signup from "./pages/Signup";
 import NotFound from "./pages/NotFound";
 import FinancialHub from "./pages/financial/FinancialHub";
 import CostsManager from "./pages/costs/CostsManager";
@@ -41,6 +42,7 @@ const App = () => (
             <Routes>
               {/* Rota Publica */}
               <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
 
               {/* Rotas Privadas */}
               <Route element={<ProtectedRoute />}>
