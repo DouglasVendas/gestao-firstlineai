@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Invoice } from "./useInvoices";
 import { VariableCost } from "./useVariableCosts";
 import { parseISO, format, startOfMonth } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 /**
  * Tax rate for "Imposto sobre Receita" (Simples Nacional - 11%)
@@ -87,7 +88,7 @@ export const useEnsureTaxes = (invoices: Invoice[], variableCosts: VariableCost[
             // Format the description with locale-aware month/year
             // e.g., "AUTO_GERADO - Imposto sobre Receita (Jan/26)"
             const monthYearStr = format(monthDate, 'MMM/yy', {
-                locales: require('date-fns/locale/pt-BR')
+                locale: ptBR
             }).toUpperCase();
 
             return supabase
