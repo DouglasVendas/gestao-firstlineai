@@ -1,9 +1,13 @@
-import { GoogleGenerativeAI, FunctionDeclaration, FunctionDeclarationSchema, FunctionDeclarationSchemaProperty } from "@google/generative-ai";
+import OpenAI from "openai";
 import { supabase } from "@/integrations/supabase/client";
 
-// Initialize Gemini AI
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
-const genAI = new GoogleGenerativeAI(API_KEY);
+// Initialize Moonshot (Kimi) AI
+const API_KEY = import.meta.env.VITE_KIMI_API_KEY || "";
+const openai = new OpenAI({
+    apiKey: API_KEY,
+    baseURL: "https://api.moonshot.cn/v1",
+    dangerouslyAllowBrowser: true, // we are calling it from vite frontend
+});
 
 export interface FinancialContext {
     mrr: number;
@@ -16,56 +20,63 @@ export interface FinancialContext {
     last_month: string;
 }
 
-// 1. Declarar as ferramentas que o Gemini pode chamar
-const updateTransactionDeclaration: FunctionDeclaration = {
-    name: "update_transaction_data",
-    description: "Atualiza os dados de uma ou múltiplas transações financeiras específicas (Invoices, fixed_costs, variable_costs ou transactions) no banco de dados.",
-    parameters: {
-        type: "object" as any,
-        properties: {
-            table_name: {
-                type: "string" as any,
-                description: "O nome da tabela para atualizar (invoices, fixed_costs, variable_costs, transactions). Caso a intenção seja sobre vendas, provavelmente é invoices.",
-            },
-            filters: {
-                type: "object" as any,
-                description: "Filtros para encontrar os registros (ex: { description: 'Nome do Cliente' }).",
-            },
-            updates: {
-                type: "object" as any,
-                description: "Colunas e novos valores para atualizar (ex: { amount: 150.50, status: 'completed' }).",
+// 1. Declarar as ferramentas que o Kimi pode chamar
+const tools: any[] = [
+    {
+        type: "function",
+        function: {
+            name: "update_transaction_data",
+            description: "Atualiza os dados de uma ou múltiplas transações financeiras específicas (Invoices, fixed_costs, variable_costs ou transactions) no banco de dados.",
+            parameters: {
+                type: "object",
+                properties: {
+                    table_name: {
+                        type: "string",
+                        description: "O nome da tabela para atualizar (invoices, fixed_costs, variable_costs, transactions). Caso a intenção seja sobre vendas, provavelmente é invoices.",
+                    },
+                    filters: {
+                        type: "object",
+                        description: "Filtros para encontrar os registros (ex: { description: 'Nome do Cliente' }).",
+                    },
+                    updates: {
+                        type: "object",
+                        description: "Colunas e novos valores para atualizar (ex: { amount: 150.50, status: 'completed' }).",
+                    }
+                },
+                required: ["table_name", "filters", "updates"],
             }
-        },
-        required: ["table_name", "filters", "updates"],
-    } as FunctionDeclarationSchema,
-};
-
-const queryTransactionDeclaration: FunctionDeclaration = {
-    name: "query_transaction_data",
-    description: "Pesquisa por transações financeiras específicas no banco de dados para responder perguntas numéricas (listagem, somatórias, quantidades). Útil para listar itens de um mês ou pesquisar uma entrada específica.",
-    parameters: {
-        type: "object" as any,
-        properties: {
-            table_name: {
-                type: "string" as any,
-                description: "O nome da tabela para pesquisar (prioritariamente 'transactions').",
-            },
-            filters: {
-                type: "object" as any,
-                description: "Filtros exatos de igualdade (ex: { category: 'Venda', type: 'income' }). Opcional.",
-            },
-            search_description: {
-                type: "string" as any,
-                description: "Palavra chave opcional para buscar na descrição usando ilike (ex: 'C6 Bank').",
-            },
-            date_range: {
-                type: "object" as any,
-                description: "Filtro opcional de período. Objeto com { start_date: 'YYYY-MM-DD', end_date: 'YYYY-MM-DD' }.",
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "query_transaction_data",
+            description: "Pesquisa por transações financeiras específicas no banco de dados para responder perguntas numéricas (listagem, somatórias, quantidades). Útil para listar itens de um mês ou pesquisar uma entrada específica.",
+            parameters: {
+                type: "object",
+                properties: {
+                    table_name: {
+                        type: "string",
+                        description: "O nome da tabela para pesquisar (prioritariamente 'transactions').",
+                    },
+                    filters: {
+                        type: "object",
+                        description: "Filtros exatos de igualdade (ex: { category: 'Venda', type: 'income' }). Opcional.",
+                    },
+                    search_description: {
+                        type: "string",
+                        description: "Palavra chave opcional para buscar na descrição usando ilike (ex: 'C6 Bank').",
+                    },
+                    date_range: {
+                        type: "object",
+                        description: "Filtro opcional de período. Objeto com { start_date: 'YYYY-MM-DD', end_date: 'YYYY-MM-DD' }.",
+                    }
+                },
+                required: ["table_name"],
             }
-        },
-        required: ["table_name"],
-    } as FunctionDeclarationSchema,
-};
+        }
+    }
+];
 
 export const generateFinancialResponse = async (
     message: string,
@@ -73,17 +84,10 @@ export const generateFinancialResponse = async (
     history: any[] = [] // Opcional, para passar histórico no futuro
 ): Promise<{ text: string; dataUpdated: boolean }> => {
     if (!API_KEY) {
-        return { text: "Erro: Chave de API do Gemini não configurada. Por favor, adicione VITE_GEMINI_API_KEY ao arquivo .env.", dataUpdated: false };
+        return { text: "Erro: Chave de API do Kimi não configurada. Por favor, adicione VITE_KIMI_API_KEY ao arquivo .env.", dataUpdated: false };
     }
 
     try {
-        const model = genAI.getGenerativeModel({
-            model: "gemini-2.5-flash",
-            tools: [{
-                functionDeclarations: [updateTransactionDeclaration, queryTransactionDeclaration],
-            }],
-        });
-
         const prompt = `Role: Você é a Sofia, Gerente de Projetos (PM) do SaaS Compass. Você fala em nome da "FirstLine" (uma equipe de IAs especialistas).
     
 Contexto Financeiro Atual:
@@ -101,122 +105,133 @@ Instruções de Personalidade (Humanização):
 2.  **Tom de Voz**: Natural, empático e direto. Evite formalidades robóticas. Use muitos Emojis! 🚀✨😊
 3.  **Formato**: SEPARE suas ideias em mensagens curtas. Use a tag [BREAK] para dividir o texto em balões de fala separados.
 4.  **A Equipe**: Roberto (CFO), Alice (Vendas), Lucas (Tech), Bia (Design), Sofia (PM - Você).
-7.  **Acesso Direto ao Banco**: O CEO deu permissões para vocé alterar DADOS! Se ele pedir para editar ou atualizar dados de uma certa transação, **USE A FERRAMENTA update_transaction_data**.
-    Nunca diga "clique ali para fazer", faça por você mesma se possível!
+7.  **Acesso Direto ao Banco**: O CEO deu permissões para occê alterar DADOS! Se ele pedir para editar ou atualizar dados de uma certa transação, **USE A FERRAMENTA update_transaction_data**. Nunca diga "clique ali para fazer", faça por você mesma se possível!
 8.  **Pesquisar Lançamentos**: Se o CEO perguntar valores passados, listagens do mês (ex: "Quais todas as entradas de setembro?") ou somatórias, **USE A FERRAMENTA query_transaction_data**. O BD tem todos os dados.
 
 Pergunta do CEO: "${message}"
 
 Responda como Sofia. Use [BREAK] para separar mensagens e muitos emojis.`;
 
-        // Create a chat session to handle multiple turns (Prompt -> Call -> Return -> Response)
-        const chat = model.startChat();
+        // Configure the chat messages
+        const messages: any[] = [
+            { role: "system", content: prompt },
+            { role: "user", content: message } // The user's query is also in the system prompt above, but standard is passing user role too.
+        ];
 
-        let result = await chat.sendMessage(prompt);
-        let response = result.response;
         let dataUpdated = false;
 
-        // Loop para lidar com múltiplas chamadas na mesma sessão
-        while (response.functionCalls && response.functionCalls.length > 0) {
-            const call = response.functionCalls[0];
+        let chatCompletion = await openai.chat.completions.create({
+            model: "moonshot-v1-128k",
+            messages: messages,
+            tools: tools,
+            temperature: 0.7,
+        });
 
-            if (call.name === "update_transaction_data") {
-                console.log("[Sofia AI Tool] - Executing DB Update", call.args);
-                try {
-                    const args = call.args as any;
-                    let query = supabase.from(args.table_name).update(args.updates);
+        let responseMessage = chatCompletion.choices[0].message;
+        messages.push(responseMessage);
 
-                    // Appending dynamic filters
-                    if (args.filters) {
-                        for (const [key, val] of Object.entries(args.filters)) {
-                            // Se o valor for string e não exato, tenta usar ilike. Senão, equals.
-                            if (typeof val === 'string' && key === 'description') {
-                                query = query.ilike(key, `%${val}%`);
-                            } else {
+        // Loop para lidar com múltiplas chamadas de função
+        while (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
+            for (const toolCall of responseMessage.tool_calls) {
+                if (!toolCall.function.name) continue;
+
+                const args = JSON.parse(toolCall.function.arguments);
+
+                if (toolCall.function.name === "update_transaction_data") {
+                    console.log("[Sofia AI Tool] - Executing DB Update", args);
+                    try {
+                        let query = supabase.from(args.table_name).update(args.updates);
+
+                        // Appending dynamic filters
+                        if (args.filters) {
+                            for (const [key, val] of Object.entries(args.filters)) {
+                                if (typeof val === 'string' && key === 'description') {
+                                    query = query.ilike(key, `%${val}%`);
+                                } else {
+                                    query = query.eq(key, val);
+                                }
+                            }
+                        }
+
+                        const { data, error } = await query.select();
+
+                        if (error) throw error;
+                        dataUpdated = true;
+
+                        messages.push({
+                            tool_call_id: toolCall.id,
+                            role: "tool",
+                            name: toolCall.function.name,
+                            content: JSON.stringify({ status: "success", updatedRows: data?.length || 0, details: data })
+                        });
+                    } catch (e: any) {
+                        console.error("AI Database Update Error", e);
+                        messages.push({
+                            tool_call_id: toolCall.id,
+                            role: "tool",
+                            name: toolCall.function.name,
+                            content: JSON.stringify({ status: "error", message: e.message })
+                        });
+                    }
+                } else if (toolCall.function.name === "query_transaction_data") {
+                    console.log("[Sofia AI Tool] - Executing DB Query", args);
+                    try {
+                        let query = supabase.from(args.table_name).select('*');
+
+                        if (args.filters) {
+                            for (const [key, val] of Object.entries(args.filters)) {
                                 query = query.eq(key, val);
                             }
                         }
+                        if (args.search_description) {
+                            query = query.ilike('description', `%${args.search_description}%`);
+                        }
+                        if (args.date_range && args.date_range.start_date) {
+                            query = query.gte('date', args.date_range.start_date);
+                        }
+                        if (args.date_range && args.date_range.end_date) {
+                            query = query.lte('date', args.date_range.end_date);
+                        }
+
+                        // Log para audit
+                        console.log("Query parameters: ", args);
+
+                        // Adicionar order e limit de segurança
+                        const { data, error } = await query.order('date', { ascending: false }).limit(200);
+
+                        if (error) throw error;
+
+                        messages.push({
+                            tool_call_id: toolCall.id,
+                            role: "tool",
+                            name: toolCall.function.name,
+                            content: JSON.stringify({ status: "success", rowsFound: data?.length || 0, data: data })
+                        });
+                    } catch (e: any) {
+                        console.error("AI Database Query Error", e);
+                        messages.push({
+                            tool_call_id: toolCall.id,
+                            role: "tool",
+                            name: toolCall.function.name,
+                            content: JSON.stringify({ status: "error", message: e.message })
+                        });
                     }
-
-                    const { data, error } = await query.select();
-
-                    if (error) throw error;
-                    dataUpdated = true;
-
-                    // Devolver o resultado para a IA formular a resposta final
-                    result = await chat.sendMessage([{
-                        functionResponse: {
-                            name: call.name,
-                            response: { status: "success", updatedRows: data?.length || 0, details: data }
-                        }
-                    }]);
-
-                    response = result.response;
-                } catch (e: any) {
-                    console.error("AI Database Update Error", e);
-                    // Devolve o erro para a IA
-                    result = await chat.sendMessage([{
-                        functionResponse: {
-                            name: call.name,
-                            response: { status: "error", message: e.message }
-                        }
-                    }]);
-                    response = result.response;
                 }
-            } else if (call.name === "query_transaction_data") {
-                console.log("[Sofia AI Tool] - Executing DB Query", call.args);
-                try {
-                    const args = call.args as any;
-                    let query = supabase.from(args.table_name).select('*');
-
-                    if (args.filters) {
-                        for (const [key, val] of Object.entries(args.filters)) {
-                            query = query.eq(key, val);
-                        }
-                    }
-                    if (args.search_description) {
-                        query = query.ilike('description', `%${args.search_description}%`);
-                    }
-                    if (args.date_range && args.date_range.start_date) {
-                        query = query.gte('date', args.date_range.start_date);
-                    }
-                    if (args.date_range && args.date_range.end_date) {
-                        query = query.lte('date', args.date_range.end_date);
-                    }
-
-                    // Log para audit
-                    console.log("Query parameters: ", args);
-
-                    // Adicionar order e limit de segurança
-                    const { data, error } = await query.order('date', { ascending: false }).limit(200);
-
-                    if (error) throw error;
-
-                    result = await chat.sendMessage([{
-                        functionResponse: {
-                            name: call.name,
-                            response: { status: "success", rowsFound: data?.length || 0, data: data }
-                        }
-                    }]);
-
-                    response = result.response;
-                } catch (e: any) {
-                    console.error("AI Database Query Error", e);
-                    result = await chat.sendMessage([{
-                        functionResponse: {
-                            name: call.name,
-                            response: { status: "error", message: e.message }
-                        }
-                    }]);
-                    response = result.response;
-                }
-            } else {
-                // Break infinite loop se for uma função desconhecida
-                break;
             }
+
+            // Call again with tool results
+            chatCompletion = await openai.chat.completions.create({
+                model: "moonshot-v1-128k",
+                messages: messages,
+                tools: tools,
+                temperature: 0.7,
+            });
+
+            responseMessage = chatCompletion.choices[0].message;
+            messages.push(responseMessage);
         }
 
-        return { text: response.text(), dataUpdated };
+        return { text: responseMessage.content || "", dataUpdated };
     } catch (error) {
         console.error("Error generating AI response:", error);
         return { text: "Desculpe, tive um problema ao processar sua solicitação. Verifique sua conexão ou tente novamente.", dataUpdated: false };

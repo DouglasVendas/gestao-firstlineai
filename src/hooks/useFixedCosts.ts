@@ -7,6 +7,7 @@ export interface FixedCost {
     description: string | null;
     budgeted: number | null;
     actual: number;
+    status: 'pending' | 'paid' | 'cancelled';
     created_at: string;
     month: string | null;
 }
@@ -27,6 +28,7 @@ export const useFixedCosts = () => {
 };
 
 export const useCreateFixedCost = () => {
+    const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (newCost: Omit<FixedCost, "id" | "created_at">) => {
             const { data, error } = await supabase
@@ -39,7 +41,6 @@ export const useCreateFixedCost = () => {
             return data;
         },
         onSuccess: () => {
-            const queryClient = useQueryClient();
             queryClient.invalidateQueries({ queryKey: ["fixed_costs"] });
         },
     });

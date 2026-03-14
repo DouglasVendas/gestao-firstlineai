@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/auth/AuthContext";
 import {
   LayoutDashboard,
   Users,
@@ -23,7 +24,8 @@ import {
   Calculator,
   ChevronsUpDown,
   Plus,
-  Check
+  Check,
+  LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettings } from "@/hooks/useSettings";
@@ -36,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"; // Assuming Avatar components are from shadcn/ui
 
 interface NavItem {
   title: string;
@@ -70,6 +73,7 @@ const navigation: NavGroup[] = [
 export function AppSidebar() {
   const { settings } = useSettings();
   const location = useLocation();
+  const { user, signOut } = useAuth();
   const [expandedGroups, setExpandedGroups] = useState<string[]>(
     navigation.map((g) => g.title)
   );

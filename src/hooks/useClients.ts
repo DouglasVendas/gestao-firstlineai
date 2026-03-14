@@ -76,6 +76,7 @@ export const useRecentClients = () => {
 };
 
 export const useCreateClient = () => {
+    const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (newClient: Omit<Client, "id" | "created_at" | "plan"> & { plan_id?: string }) => {
             const { data, error } = await supabase
@@ -88,7 +89,6 @@ export const useCreateClient = () => {
             return data;
         },
         onSuccess: () => {
-            const queryClient = useQueryClient();
             queryClient.invalidateQueries({ queryKey: ["clients"] });
             queryClient.invalidateQueries({ queryKey: ["clients", "count"] });
             queryClient.invalidateQueries({ queryKey: ["clients", "recent"] });

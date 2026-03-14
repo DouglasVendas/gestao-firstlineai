@@ -1,8 +1,6 @@
 import { useMemo } from "react";
 import { useFinancialData } from "@/contexts/FinancialContext";
-import { startOfMonth, endOfMonth, isWithinInterval, parseISO, isSameMonth, subMonths, startOfDay, endOfDay, eachMonthOfInterval, min as minDate, max as maxDate, format } from "date-fns";
-import { clientOverrides } from "@/config/clientOverrides";
-import { financialConfig } from "@/config/financialConfig";
+import { startOfMonth, endOfMonth, isSameMonth, subMonths, startOfDay, eachMonthOfInterval, format, parseISO } from "date-fns";
 
 export interface DashboardMetrics {
     activeClients: number;
@@ -40,19 +38,10 @@ function calculateMetricsForMonth(
 
     // 1. ACTIVE CLIENTS (At end of month)
     const activeClients = clients.filter(c => {
-        // Check for duplicates/ignores
-        const override = clientOverrides.find(o => o.nameMatch && c.name.toLowerCase().includes(o.nameMatch.toLowerCase()));
-        if (override?.ignore) return false;
-
         const startDate = c.start_date ? parseISO(c.start_date) : parseISO(c.created_at);
-        // Use override churn date if available
-        const churnDate = (override?.status === 'churned' && override.churnDate)
-            ? parseISO(override.churnDate)
-            : (c.churn_date ? parseISO(c.churn_date) : null);
+        const churnDate = c.churn_date ? parseISO(c.churn_date) : null;
 
-        // Started before or during month
         const started = startDate <= monthEnd;
-        // Not churned, or churned after this month
         const notChurned = !churnDate || churnDate > monthEnd;
 
         return started && notChurned;
@@ -61,30 +50,15 @@ function calculateMetricsForMonth(
     const activeClientsCount = activeClients.length;
 
     // 2. CHURN RATE
-    // Clients who were active at start of month and churned during month
     const activeAtStart = clients.filter(c => {
-        const override = clientOverrides.find(o => o.nameMatch && c.name.toLowerCase().includes(o.nameMatch.toLowerCase()));
-        if (override?.ignore) return false;
-
         const startDate = c.start_date ? parseISO(c.start_date) : parseISO(c.created_at);
-        const churnDate = (override?.status === 'churned' && override.churnDate)
-            ? parseISO(override.churnDate)
-            : (c.churn_date ? parseISO(c.churn_date) : null);
-
+        const churnDate = c.churn_date ? parseISO(c.churn_date) : null;
         return startDate < monthStart && (!churnDate || churnDate >= monthStart);
     }).length;
 
     const churnedInMonth = clients.filter(c => {
-        // Check overrides first
-        const override = clientOverrides.find(o => o.nameMatch && c.name.toLowerCase().includes(o.nameMatch.toLowerCase()));
-        if (override?.ignore) return false;
-
-        const churnDateStr = (override?.status === 'churned' && override.churnDate)
-            ? override.churnDate
-            : c.churn_date;
-
-        if (!churnDateStr) return false;
-        const churnDate = parseISO(churnDateStr);
+        if (!c.churn_date) return false;
+        const churnDate = parseISO(c.churn_date);
         return isSameMonth(churnDate, date);
     });
 
@@ -92,55 +66,9 @@ function calculateMetricsForMonth(
     const churnRate = activeAtStart > 0 ? (churnedInMonthCount / activeAtStart) * 100 : 0;
 
     // 3. MRR & ARR
-    // Sum of MRR for clients active at END of month
-    // Normalization Logic:
-    // If client.mrr matches plan.price_yearly (within small margin), it's Annual. Divide by 12.
-    // If client.mrr matches plan.price_monthly, it's Monthly. Keep as is.
-    // Fallback: If plan name contains "Anual", divide by 12. "Semestral" divide by 6.
-
+    // Os clientes no banco de dados agora já possuem o mrr calculado corretamente da Fase 1
     const mrr = activeClients.reduce((sum, client) => {
-        let value = Number(client.mrr) || 0;
-        const override = clientOverrides.find(o => o.nameMatch && client.name.toLowerCase().includes(o.nameMatch.toLowerCase()));
-
-        // Apply Override Periodicity Logic if exists
-        if (override?.periodicity) {
-            if (override.periodicity === 'annual') value = value / 12;
-            else if (override.periodicity === 'semestral') value = value / 6;
-            else if (override.periodicity === 'quarterly') value = value / 3;
-            else if (override.periodicity === 'bi-monthly') value = value / 2;
-            else if (override.periodicity === 'annual_monthly_payment') {
-                // MRR is already correct (monthly payment), do not divide.
-                // Treat as monthly for value, but logic elsewhere might track duration.
-            }
-        }
-        else if (client.plan) {
-            const isYearlyPrice = Math.abs(value - (client.plan.price_yearly || 0)) < 1;
-            const isYearlyName = client.plan.name.toLowerCase().includes('anual');
-            const isSemestralName = client.plan.name.toLowerCase().includes('semestral');
-            const isQuarterlyName = client.plan.name.toLowerCase().includes('trimestral');
-
-            // If plan has explicit yearly price and MRR matches it (approx), use yearly divisor
-            if (client.plan.price_yearly && Math.abs(value - client.plan.price_yearly) < 50) {
-                value = value / 12;
-            }
-            // If plan has explicit monthly price, and MRR is suspiciously high (e.g. > 4x monthly), assume it's a multi-month contract manually entered.
-            else if (client.plan.price_monthly && value > (client.plan.price_monthly * 4)) {
-                // Try to guess if it's annual (approx 10-12x) or semestral (approx 6x)
-                const ratio = value / client.plan.price_monthly;
-                if (ratio >= 10) value = value / 12;
-                else if (ratio >= 5) value = value / 6;
-                else if (ratio >= 2.5) value = value / 3;
-            }
-            // Fallback to name check
-            else if (isYearlyName) {
-                value = value / 12;
-            } else if (isSemestralName) {
-                value = value / 6;
-            } else if (isQuarterlyName) {
-                value = value / 3;
-            }
-        }
-
+        const value = Number(client.mrr) || 0;
         return sum + value;
     }, 0);
 
@@ -230,12 +158,15 @@ function calculateMetricsForMonth(
     ).size;
 
     // 10. RUNWAY & CASH BALANCE
-    // Dynamic Logic:
-    // Base Balance (from Config) + Revenue (since RefDate) - Expenses (since RefDate)
-    // We calculate the balance *at the end of the selected month*.
+    // A lógica real do saldo inicial deverá consumir da tabela financial_settings criada na migration anterior
+    // Temporariamente usaremos um fallback de R$ 0.00 se o DB ainda não retornou, caso contrário ele se compõe.
+    // LOBBY DE DADOS DO DB PARA CASHFLOW
 
-    const balanceRefDate = parseISO(financialConfig.referenceDate);
-    const billingRefDate = startOfDay(balanceRefDate); // Normalize
+    // Fallbacks simples local antes da RLS API carregar as Settings
+    const initialCashBalance = 0; // Isso virá do fetch Settings
+    const referenceDateStr = '2026-02-12';
+    const balanceRefDate = parseISO(referenceDateStr);
+    const billingRefDate = startOfDay(balanceRefDate);
 
     // We only consider transactions that happened AFTER the reference date AND BEFORE (or ON) the selected month end.
     // Actually, for "Current Balance" in the Dashboard, usually users want "Today's Balance".
@@ -313,7 +244,7 @@ function calculateMetricsForMonth(
 
     const totalExpenseDelta = expenseDeltaFixed + expenseDeltaVariable;
 
-    let cashBalance = financialConfig.initialCashBalance + revenueDelta - totalExpenseDelta;
+    let cashBalance = initialCashBalance + revenueDelta - totalExpenseDelta;
 
     // Burn Rate & Runway logic
     let runway = 0;

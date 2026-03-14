@@ -9,6 +9,13 @@ import { useToast } from "@/components/ui/use-toast";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { supabase } from "@/integrations/supabase/client";
+import { format, parseISO } from "date-fns";
+
+/**
+ * Sentinel client UUID for imported invoices without a client mapping (C2 fix)
+ * This matches the sentinel client created in the database migration
+ */
+const GENERIC_CLIENT_ID = '00000000-0000-0000-0000-000000000001';
 
 interface ImportRow {
     id: number;
@@ -274,15 +281,9 @@ export function DataImportModal() {
             let payload: any = {};
 
             if (row.category === "income") {
-                // For invoices table
+                // For invoices table (C2 fix: use sentinel client instead of null)
                 payload = {
-                    client_id: null, // We don't have client ID mapping yet, maybe use a default "Importado" client if strictly required, or null? 
-                    // Invoices usually require a client_id. If schema enforces it, we might fail. 
-                    // Let's assume nullable or we need to look up a generic client.
-                    // IMPORTANT: 'invoices' table has 'client_id' foreign key. We might need a dummy client.
-                    // For now, let's try assuming nullable or handle error. 
-                    // Actually, better to skip client_id if allowed, or maybe we create a "Cliente Diverso" on the fly?
-                    // Let's leave client_id null and see if supabase rejects.
+                    client_id: GENERIC_CLIENT_ID, // Sentinel "Cliente Genérico" for unmapped imported invoices
                     value: Math.abs(row.amount),
                     due_date: row.date,
                     paid_date: row.date, // "DtBaixa" means paid
@@ -290,11 +291,11 @@ export function DataImportModal() {
                     description: row.description || "Receita Importada"
                 };
             } else {
-                // Costs
+                // Costs (C3 fix: use full YYYY-MM-DD date instead of YYYY-MM)
                 payload = {
                     description: row.description,
                     category: "Importado", // Or mapping from row.originalRow['DepesasReceitas'] if available
-                    month: row.month, // YYYY-MM
+                    month: row.date, // Use full YYYY-MM-DD date, not YYYY-MM
                 };
 
                 // Try to use original category if present

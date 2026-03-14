@@ -38,6 +38,7 @@ const formSchema = z.object({
     budgeted: z.coerce.number().min(0),
     actual: z.coerce.number().min(0),
     due_day: z.coerce.number().min(1).max(31).optional(),
+    month: z.string().min(1, "Mês de competência obrigatório"), // C3 fix: add month field
 });
 
 export function CreateFixedCostModal() {
@@ -52,6 +53,7 @@ export function CreateFixedCostModal() {
             budgeted: 0,
             actual: 0,
             description: "",
+            month: new Date().toISOString().split("T")[0], // Default to today (YYYY-MM-DD format)
         },
     });
 
@@ -168,6 +170,19 @@ export function CreateFixedCostModal() {
                                 )}
                             />
                         </div>
+                        <FormField
+                            control={form.control}
+                            name="month"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Mês de Competência</FormLabel>
+                                    <FormControl>
+                                        <Input type="date" {...field} />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
                         <FormField
                             control={form.control}
                             name="due_day"

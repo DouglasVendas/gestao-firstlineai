@@ -5,14 +5,14 @@ import { NotificationsDropdown } from "@/components/header/NotificationsDropdown
 import { UserDropdown } from "@/components/header/UserDropdown";
 import { useFinancialData } from "@/contexts/FinancialContext";
 import { MonthPicker } from "@/components/common/MonthPicker";
+import { Outlet } from "react-router-dom";
 
 interface AppLayoutProps {
-  children: React.ReactNode;
   title?: string;
   subtitle?: string;
 }
 
-export function AppLayout({ children, title, subtitle }: AppLayoutProps) {
+export function AppLayout({ title, subtitle }: AppLayoutProps) {
   const { selectedMonth, setSelectedMonth } = useFinancialData();
   return (
     <div className="min-h-screen bg-background">
@@ -56,7 +56,7 @@ export function AppLayout({ children, title, subtitle }: AppLayoutProps) {
 
         {/* Page Content */}
         <main className="p-6">
-          {children}
+          <Outlet />
         </main>
       </div>
     </div>

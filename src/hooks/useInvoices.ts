@@ -15,6 +15,14 @@ export interface Invoice {
     } | null;
 }
 
+export interface CreateInvoiceInput {
+    client_id: string; // Now required (not nullable) — enforced by DB constraint
+    value: number;
+    due_date: string;
+    status: 'paid' | 'pending' | 'overdue' | 'canceled';
+    paid_date: string | null;
+}
+
 export const useInvoices = () => {
     return useQuery({
         queryKey: ["invoices"],
@@ -34,8 +42,9 @@ export const useInvoices = () => {
 };
 
 export const useCreateInvoice = () => {
+    const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (newInvoice: any) => {
+        mutationFn: async (newInvoice: CreateInvoiceInput) => {
             const { data, error } = await supabase
                 .from("invoices")
                 .insert(newInvoice)
@@ -46,7 +55,6 @@ export const useCreateInvoice = () => {
             return data;
         },
         onSuccess: () => {
-            const queryClient = useQueryClient();
             queryClient.invalidateQueries({ queryKey: ["invoices"] });
         },
     });

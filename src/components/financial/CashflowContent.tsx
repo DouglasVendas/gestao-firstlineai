@@ -3,7 +3,6 @@ import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, DollarSign, Wallet, Download, Loader2, Calendar as CalendarIcon } from "lucide-react";
-import { financialConfig } from "@/config/financialConfig";
 import {
     AreaChart,
     Area,
@@ -90,7 +89,7 @@ export function CashflowContent() {
                     category: fc.category,
                     amount: fc.actual,
                     type: 'saida',
-                    date: `${fc.month}-01`,
+                    date: fc.month, // fc.month is already YYYY-MM-DD from DB
                     status: 'completed'
                 });
             }
@@ -105,8 +104,8 @@ export function CashflowContent() {
                     category: vc.category,
                     amount: vc.amount,
                     type: 'saida',
-                    date: `${vc.month}-01`,
-                    status: (vc as any).status === 'pending' ? 'pending' : 'completed'
+                    date: vc.month, // vc.month is already YYYY-MM-DD from DB
+                    status: vc.status === 'pending' ? 'pending' : 'completed'
                 });
             }
         });
@@ -265,8 +264,7 @@ export function CashflowContent() {
                 saldo: 0
             });
         }
-
-        let runningBalance = financialConfig.initialCashBalance || 0; // Se houver controle estrito, usar saldo prévio 
+        let runningBalance = 0; // Se houver controle estrito, usar saldo prévio do Context
 
         cashflowItems.forEach(item => {
             if (!item.date) return;
@@ -328,11 +326,10 @@ export function CashflowContent() {
                 <CreateTransactionModal />
             </div>
 
-            {/* Metric Cards */}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <MetricCard
                     title="Saldo Atual (Caixa)"
-                    value={formatCurrency(financialConfig.initialCashBalance)}
+                    value={formatCurrency(0)}
                     change={0}
                     icon={Wallet}
                     description="Saldo acumulado total"

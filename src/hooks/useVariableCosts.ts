@@ -7,6 +7,8 @@ export interface VariableCost {
     amount: number;
     description: string | null;
     month: string; // ISO date YYYY-MM-DD
+    status: 'pending' | 'paid' | 'cancelled';
+    is_auto_generated: boolean;
     created_at: string;
 }
 
@@ -26,6 +28,7 @@ export const useVariableCosts = () => {
 };
 
 export const useCreateVariableCost = () => {
+    const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (newCost: Omit<VariableCost, "id" | "created_at">) => {
             const { data, error } = await supabase
@@ -38,7 +41,6 @@ export const useCreateVariableCost = () => {
             return data;
         },
         onSuccess: () => {
-            const queryClient = useQueryClient();
             queryClient.invalidateQueries({ queryKey: ["variable_costs"] });
         },
     });

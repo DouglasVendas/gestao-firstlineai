@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { ptBR } from "date-fns/locale";
-import { format, isAfter, endOfMonth, startOfMonth } from "date-fns";
+import { format, isAfter, endOfMonth, startOfMonth, isSameMonth, parseISO } from "date-fns";
 import { calculateProjectedRevenue } from "@/utils/projections";
 
 interface DRELine {
@@ -28,10 +28,6 @@ interface DRELine {
 export function DreContent() {
     const { invoices, fixedCosts, variableCosts, selectedMonth, setSelectedMonth, isLoading: isLoadingData, clients } = useFinancialData();
 
-    const selectedMonthStr = useMemo(() => {
-        return format(selectedMonth, 'yyyy-MM');
-    }, [selectedMonth]);
-
     // --- Calculations ---
 
     // 1. Gross Revenue (Receita Bruta) - Paid Invoices in the selected month
@@ -40,10 +36,10 @@ export function DreContent() {
         return invoices
             .filter(inv => {
                 if (inv.status !== 'paid' || !inv.paid_date) return false;
-                return inv.paid_date.startsWith(selectedMonthStr);
+                return isSameMonth(parseISO(inv.paid_date), selectedMonth);
             })
             .reduce((sum, inv) => sum + (inv.value || 0), 0);
-    }, [invoices, selectedMonthStr]);
+    }, [invoices, selectedMonth]);
 
     // 1.1 Projected Revenue (from Contracts)
     const receitaProjetada = useMemo(() => {
@@ -60,7 +56,7 @@ export function DreContent() {
     const receitaBruta = useMemo(() => {
         const today = new Date();
         const isFuture = isAfter(startOfMonth(selectedMonth), endOfMonth(today));
-        const isCurrent = format(selectedMonth, 'yyyy-MM') === format(today, 'yyyy-MM');
+        const isCurrent = isSameMonth(selectedMonth, today);
 
         // If future, use projected.
         // If current, use projected (Forecast view) or Max? 
@@ -78,11 +74,11 @@ export function DreContent() {
     }, [receitaProjetada, receitaRealizada, selectedMonth]);
 
 
-    // 2. Variable Costs & Taxes
+    // 2. Variable Costs & Taxes (C3 fix: use isSameMonth instead of string comparison)
     const currentVariableCosts = useMemo(() => {
         if (!variableCosts) return [];
-        return variableCosts.filter(c => c.month === selectedMonthStr || (c.month && c.month.startsWith(selectedMonthStr)));
-    }, [variableCosts, selectedMonthStr]);
+        return variableCosts.filter(c => c.month && isSameMonth(parseISO(c.month), selectedMonth));
+    }, [variableCosts, selectedMonth]);
 
     const impostos = useMemo(() => {
         return currentVariableCosts
@@ -100,14 +96,14 @@ export function DreContent() {
 
     const margemContribuicao = receitaLiquida - totalVariable;
 
-    // 3. Fixed Costs
+    // 3. Fixed Costs (C3 fix: use isSameMonth instead of string comparison)
     const currentFixedCosts = useMemo(() => {
         if (!fixedCosts) return [];
         return fixedCosts.filter(c => {
-            if (c.month) return c.month === selectedMonthStr || c.month.startsWith(selectedMonthStr);
+            if (c.month) return isSameMonth(parseISO(c.month), selectedMonth);
             return false;
         });
-    }, [fixedCosts, selectedMonthStr]);
+    }, [fixedCosts, selectedMonth]);
 
     const totalFixed = currentFixedCosts.reduce((acc, c) => acc + c.actual, 0);
 
