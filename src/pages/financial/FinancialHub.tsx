@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DreContent } from "@/components/financial/DreContent";
 import { CashflowContent } from "@/components/financial/CashflowContent";
@@ -9,6 +8,7 @@ import { FixedCostsContent } from "@/components/costs/FixedCostsContent";
 import { VariableCostsContent } from "@/components/costs/VariableCostsContent";
 import { DataImportModal } from "@/components/financial/DataImportModal";
 import { useFinancialData } from "@/contexts/FinancialContext";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { CalendarIcon } from "@radix-ui/react-icons";
@@ -19,6 +19,11 @@ import { cn } from "@/lib/utils";
 export default function FinancialHub() {
     const [date, setDate] = useState<Date | undefined>(new Date());
     const { setSelectedMonth } = useFinancialData();
+    const { setPageTitle } = usePageTitle();
+
+    useEffect(() => {
+        setPageTitle("Hub Financeiro", "Centralizada de resultados, caixa, e gestão de SaaS");
+    }, [setPageTitle]);
 
     useEffect(() => {
         if (date) {
@@ -27,10 +32,6 @@ export default function FinancialHub() {
     }, [date, setSelectedMonth]);
 
     return (
-        <AppLayout
-            title="Hub Financeiro"
-            subtitle="Centralizada de resultados, caixa, e gestão de SaaS"
-        >
             <div className="space-y-8 animate-in fade-in duration-500">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
@@ -112,6 +113,5 @@ export default function FinancialHub() {
                     </TabsContent>
                 </Tabs>
             </div>
-        </AppLayout>
     );
 }

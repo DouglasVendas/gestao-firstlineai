@@ -1,5 +1,6 @@
+import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { AppLayout } from "@/components/layout/AppLayout";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { GREPillar, GREModule } from "@/types/gre";
@@ -21,6 +22,7 @@ const TYPE_ICONS: Record<string, any> = {
 };
 
 export default function GREPillarDetail() {
+    const { setPageTitle } = usePageTitle();
     const { id } = useParams();
     const navigate = useNavigate();
     const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
@@ -66,8 +68,12 @@ export default function GREPillarDetail() {
 
     const selectedModule = modules?.find(m => m.id === selectedModuleId);
 
+    React.useEffect(() => {
+        setPageTitle(pillar.title, "GRE Operating System");
+    }, [pillar.title, setPageTitle]);
+
     return (
-        <AppLayout title={pillar.title} subtitle="GRE Operating System">
+        <>
             <div className="h-[calc(100vh-10rem)] flex flex-col space-y-4 animate-fade-in overflow-hidden">
                 {/* Header */}
                 <div className="flex items-center gap-4 shrink-0">
@@ -170,6 +176,6 @@ export default function GREPillarDetail() {
                     </div>
                 </div>
             </div>
-        </AppLayout>
+        </>
     );
 }

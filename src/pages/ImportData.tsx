@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
+import React, { useState } from "react";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +32,12 @@ interface ImportRow {
 }
 
 export default function ImportData() {
+    const { setPageTitle } = usePageTitle();
     const { toast } = useToast();
+
+    React.useEffect(() => {
+        setPageTitle("Importação de Dados", "Importe dados financeiros em massa via Excel ou CSV");
+    }, [setPageTitle]);
     const [data, setData] = useState<ImportRow[]>([]);
     const [file, setFile] = useState<File | null>(null);
     const [isUploading, setIsUploading] = useState(false);
@@ -269,7 +274,7 @@ export default function ImportData() {
     };
 
     return (
-        <AppLayout title="Importação de Dados" subtitle="Importe dados financeiros em massa via Excel ou CSV">
+        <>
             <div className="grid gap-6">
                 <Card>
                     <CardHeader>
@@ -384,6 +389,6 @@ export default function ImportData() {
                     </CardContent>
                 </Card>
             </div>
-        </AppLayout>
+        </>
     );
 }

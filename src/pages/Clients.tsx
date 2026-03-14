@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
+import React, { useMemo, useState } from "react";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -51,10 +51,15 @@ const formatDate = (dateString: string) => {
 };
 
 export default function Clients() {
+  const { setPageTitle } = usePageTitle();
   const { clients, invoices, selectedMonth, isLoading } = useFinancialData();
   const updateClient = useUpdateClient();
   const deleteClient = useDeleteClient();
   const { toast } = useToast();
+
+  React.useEffect(() => {
+    setPageTitle("Clientes", "Gestão de clientes e contratos");
+  }, [setPageTitle]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [editClient, setEditClient] = useState<Client | null>(null);
@@ -229,16 +234,14 @@ export default function Clients() {
 
   if (isLoading) {
     return (
-      <AppLayout title="Clientes" subtitle="Gestão de clientes e contratos">
-        <div className="flex h-[400px] items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
-      </AppLayout>
+      <div className="flex h-[400px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
     );
   }
 
   return (
-    <AppLayout title="Clientes" subtitle="Gestão de clientes e contratos">
+    <>
       {/* Actions Bar */}
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-1 items-center gap-3">
@@ -572,6 +575,6 @@ export default function Clients() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </AppLayout>
+    </>
   );
 }

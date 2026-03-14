@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { NotificationsDropdown } from "@/components/header/NotificationsDropdown";
 import { UserDropdown } from "@/components/header/UserDropdown";
 import { useFinancialData } from "@/contexts/FinancialContext";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { MonthPicker } from "@/components/common/MonthPicker";
 import { Outlet } from "react-router-dom";
 
@@ -12,8 +13,13 @@ interface AppLayoutProps {
   subtitle?: string;
 }
 
-export function AppLayout({ title, subtitle }: AppLayoutProps) {
+export function AppLayout({ title: propTitle, subtitle: propSubtitle }: AppLayoutProps) {
   const { selectedMonth, setSelectedMonth } = useFinancialData();
+  const { title: contextTitle, subtitle: contextSubtitle } = usePageTitle();
+
+  // Use prop title if provided, otherwise use context title
+  const title = propTitle || contextTitle;
+  const subtitle = propSubtitle || contextSubtitle;
   return (
     <div className="min-h-screen bg-background">
       <AppSidebar />

@@ -1,4 +1,5 @@
-import { AppLayout } from "@/components/layout/AppLayout";
+import React from "react";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContractGenerator } from "@/components/legal/ContractGenerator";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,13 +10,15 @@ import { useLegalTemplates } from "@/hooks/useLegalTemplates";
 import { Button } from "@/components/ui/button";
 
 export default function LegalHub() {
+    const { setPageTitle } = usePageTitle();
     const { templates, removeTemplate } = useLegalTemplates();
 
+    React.useEffect(() => {
+        setPageTitle("Hub Jurídico", "Gestão de contratos, compliance e segurança jurídica");
+    }, [setPageTitle]);
+
     return (
-        <AppLayout
-            title="Hub Jurídico"
-            subtitle="Gestão de contratos, compliance e segurança jurídica"
-        >
+        <>
             <Tabs defaultValue="generator" className="space-y-6">
                 <div className="flex items-center justify-between">
                     <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
@@ -72,6 +75,6 @@ export default function LegalHub() {
                     </div>
                 </TabsContent>
             </Tabs>
-        </AppLayout>
+        </>
     );
 }

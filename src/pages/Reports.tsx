@@ -1,4 +1,5 @@
-import { AppLayout } from "@/components/layout/AppLayout";
+import React from "react";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,8 +16,14 @@ const reports = [
 const templates = ["Executivo", "Financeiro", "Vendas", "Marketing"];
 
 export default function Reports() {
+  const { setPageTitle } = usePageTitle();
+
+  React.useEffect(() => {
+    setPageTitle("Relatórios", "Geração e agendamento de relatórios");
+  }, [setPageTitle]);
+
   return (
-    <AppLayout title="Relatórios" subtitle="Geração e agendamento de relatórios">
+    <>
       <div className="mb-6 flex gap-3">
         <Button><Plus className="mr-2 h-4 w-4" />Novo Relatório</Button>
         <Button variant="outline"><Calendar className="mr-2 h-4 w-4" />Agendar</Button>
@@ -56,6 +63,6 @@ export default function Reports() {
           </div>
         </CardContent>
       </Card>
-    </AppLayout>
+    </>
   );
 }

@@ -1,4 +1,5 @@
-import { AppLayout } from "@/components/layout/AppLayout";
+import React from "react";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -44,16 +45,19 @@ const okrs = [
 ];
 
 export default function Budget() {
+  const { setPageTitle } = usePageTitle();
   const { fixedCosts, isLoading: isLoadingCosts } = useFinancialData();
   const { current, isLoading: isLoadingMetrics } = useFinancialSnapshot();
 
+  React.useEffect(() => {
+    setPageTitle("Orçamento", "Gestão de metas e budget anual");
+  }, [setPageTitle]);
+
   if (isLoadingCosts || isLoadingMetrics || !current) {
     return (
-      <AppLayout title="Orçamento" subtitle="Gestão de metas e budget anual">
-        <div className="flex h-[400px] items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
-      </AppLayout>
+      <div className="flex h-[400px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
     );
   }
 
@@ -107,10 +111,7 @@ export default function Budget() {
   ];
 
   return (
-    <AppLayout
-      title="Orçamento"
-      subtitle="Gestão de metas e budget anual"
-    >
+    <>
       {/* Actions Bar */}
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -212,6 +213,6 @@ export default function Budget() {
           ))}
         </div>
       </div>
-    </AppLayout>
+    </>
   );
 }

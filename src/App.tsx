@@ -1,5 +1,6 @@
 import { Toaster } from "@/components/ui/toaster";
 import { FinancialProvider } from "@/contexts/FinancialContext";
+import { PageTitleProvider } from "@/contexts/PageTitleContext";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -33,11 +34,12 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <FinancialProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <SetupWizard />
-          <AIChat />
+        <PageTitleProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            <SetupWizard />
+            <AIChat />
           <BrowserRouter>
             <Routes>
               {/* Rota Publica */}
@@ -71,7 +73,9 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
+          </SetupWizard>
         </TooltipProvider>
+        </PageTitleProvider>
       </FinancialProvider>
     </AuthProvider>
   </QueryClientProvider>

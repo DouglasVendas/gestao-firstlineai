@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
+import React, { useMemo, useState } from "react";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { InvoicesTable } from "@/components/receivables/InvoicesTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,13 +18,17 @@ import { useFinancialSnapshot } from "@/hooks/useFinancialMetrics";
 import { formatCurrency } from "@/lib/formatters";
 import { CreateInvoiceModal } from "@/components/modals/CreateInvoiceModal";
 import { isSameMonth, parseISO } from "date-fns";
-import { useState } from "react";
 
 export default function Receivables() {
+  const { setPageTitle } = usePageTitle();
   const { invoices, selectedMonth, isLoading } = useFinancialData();
   const { current } = useFinancialSnapshot();
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [searchTerm, setSearchTerm] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState("all");
+
+  React.useEffect(() => {
+    setPageTitle("Recebimentos", "Gestão de faturas, cobranças e inadimplência");
+  }, [setPageTitle]);
 
   const filteredInvoices = useMemo(() => {
     if (!invoices) return [];
@@ -61,14 +65,9 @@ export default function Receivables() {
 
   if (isLoading || !current) {
     return (
-      <AppLayout
-        title="Recebimentos"
-        subtitle="Gestão de faturas, cobranças e inadimplência"
-      >
-        <div className="flex h-[400px] items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
-      </AppLayout>
+      <div className="flex h-[400px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
     );
   }
 
@@ -81,10 +80,7 @@ export default function Receivables() {
   const monthDefaultRate = (monthOverdueCount / monthCount) * 100;
 
   return (
-    <AppLayout
-      title="Recebimentos"
-      subtitle="Gestão de faturas, cobranças e inadimplência"
-    >
+    <>
       {/* Actions & Filters */}
       <div className="mb-6 flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -225,6 +221,6 @@ export default function Receivables() {
           <InvoicesTable data={filteredInvoices} />
         </CardContent>
       </Card>
-    </AppLayout>
+    </>
   );
 }

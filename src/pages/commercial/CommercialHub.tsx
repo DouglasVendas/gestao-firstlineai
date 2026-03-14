@@ -1,15 +1,19 @@
-import { AppLayout } from "@/components/layout/AppLayout";
+import React from "react";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MarketingContent } from "@/components/commercial/MarketingContent";
 import { PlansContent } from "@/components/commercial/PlansContent";
 import { PipelineContent } from "@/components/commercial/PipelineContent";
 
 export default function CommercialHub() {
+    const { setPageTitle } = usePageTitle();
+
+    React.useEffect(() => {
+        setPageTitle("Hub Comercial", "Estratégia de crescimento, marketing e planos");
+    }, [setPageTitle]);
+
     return (
-        <AppLayout
-            title="Hub Comercial"
-            subtitle="Estratégia de crescimento, marketing e planos"
-        >
+        <>
             <Tabs defaultValue="pipeline" className="space-y-6">
                 <TabsList className="grid w-full grid-cols-3 lg:w-[500px]">
                     <TabsTrigger value="pipeline">Pipeline de Vendas</TabsTrigger>
@@ -29,6 +33,6 @@ export default function CommercialHub() {
                     <PlansContent />
                 </TabsContent>
             </Tabs>
-        </AppLayout>
+        </>
     );
 }

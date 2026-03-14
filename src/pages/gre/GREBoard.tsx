@@ -1,5 +1,6 @@
 
-import { AppLayout } from "@/components/layout/AppLayout";
+import React from "react";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { useQuery } from "@tanstack/react-query";
@@ -23,8 +24,13 @@ const PILLAR_ICONS: Record<string, any> = {
 };
 
 export default function GREBoard() {
+    const { setPageTitle } = usePageTitle();
     const navigate = useNavigate();
     const { overallScore, completedModules, totalModules } = useGREScore();
+
+    React.useEffect(() => {
+        setPageTitle("GRE - Gestão Racional de Escala", "Blinde sua empresa contra falhas de processo e riscos de litígio");
+    }, [setPageTitle]);
 
     const { data: pillars, isLoading } = useQuery({
         queryKey: ['gre-pillars'],
@@ -42,7 +48,7 @@ export default function GREBoard() {
     });
 
     return (
-        <AppLayout title="GRE - Gestão Racional de Escala" subtitle="Blinde sua empresa contra falhas de processo e riscos de litígio">
+        <>
             <div className="space-y-8 animate-fade-in pb-20">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
@@ -196,6 +202,6 @@ export default function GREBoard() {
                     </div>
                 </div>
             </div>
-        </AppLayout>
+        </>
     );
 }

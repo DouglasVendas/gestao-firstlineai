@@ -1,5 +1,5 @@
-import { AppLayout } from "@/components/layout/AppLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { RevenueChart } from "@/components/dashboard/RevenueChart";
 import { MRRMovementChart } from "@/components/dashboard/MRRMovementChart";
 import { ClientsTable } from "@/components/dashboard/ClientsTable";
@@ -22,6 +22,7 @@ import { GrowthMetrics } from "@/components/dashboard/growth/GrowthMetrics";
 import { RetentionMetrics } from "@/components/dashboard/retention/RetentionMetrics";
 
 import { useSettings } from "@/hooks/useSettings";
+import React;
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -36,14 +37,18 @@ export default function Index() {
   const { current, previous, isLoading } = useFinancialSnapshot();
   const { settings } = useSettings();
   const history = useFinancialHistory();
+  const { setPageTitle } = usePageTitle();
+
+  // Set page title on mount
+  React.useEffect(() => {
+    setPageTitle("Dashboard Executivo", "Visão geral das métricas financeiras e operacionais");
+  }, [setPageTitle]);
 
   if (isLoading || !current) {
     return (
-      <AppLayout title="Dashboard Executivo" subtitle="Visão geral das métricas financeiras e operacionais">
-        <div className="flex h-[400px] items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
-      </AppLayout>
+      <div className="flex h-[400px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
     );
   }
 
@@ -58,10 +63,6 @@ export default function Index() {
   const clientsChange = calculateChange(current.activeClients, previous?.activeClients || 0);
 
   return (
-    <AppLayout
-      title="Dashboard Executivo"
-      subtitle="Visão centralizada de performance (Overview, Growth e Retenção)"
-    >
       <Tabs defaultValue="overview" className="space-y-6">
         <TabsList className="grid w-full grid-cols-3 lg:w-[400px]">
           <TabsTrigger value="overview">Visão Geral</TabsTrigger>
@@ -192,6 +193,5 @@ export default function Index() {
         </TabsContent>
 
       </Tabs>
-    </AppLayout>
   );
 }

@@ -1,4 +1,5 @@
-import { AppLayout } from "@/components/layout/AppLayout";
+import React from "react";
+import { usePageTitle } from "@/contexts/PageTitleContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,8 +24,14 @@ const integrations = [
 ];
 
 export default function Settings() {
+  const { setPageTitle } = usePageTitle();
+
+  React.useEffect(() => {
+    setPageTitle("Configurações", "Configurações do sistema e preferências");
+  }, [setPageTitle]);
+
   return (
-    <AppLayout title="Configurações" subtitle="Configurações do sistema e preferências">
+    <>
       <Tabs defaultValue="empresa" className="space-y-6">
         <TabsList>
           <TabsTrigger value="empresa"><Building2 className="mr-2 h-4 w-4" />Empresa</TabsTrigger>
@@ -115,6 +122,6 @@ export default function Settings() {
           </Card>
         </TabsContent>
       </Tabs>
-    </AppLayout>
+    </>
   );
 }
