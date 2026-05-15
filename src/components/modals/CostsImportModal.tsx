@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import {
@@ -24,6 +24,7 @@ import {
 } from "@/lib/costImport";
 import { useAuth } from "@/contexts/auth/AuthContext";
 import { resolveActiveOrganizationId } from "@/hooks/useCostAttachments";
+import { CashAccount, upsertCashMovement, useCashAccounts } from "@/hooks/useCashAccounts";
 
 function downloadUnifiedTemplate() {
   const ws = XLSX.utils.aoa_to_sheet([UNIFIED_COST_TEMPLATE_HEADERS, ...UNIFIED_COST_TEMPLATE_EXAMPLES]);
@@ -54,11 +55,32 @@ function readFile(file: File, onDone: (rows: ParsedUnifiedCostRow[]) => void) {
   reader.readAsArrayBuffer(file);
 }
 
-function normalizeVariableStatus(status: string | null) {
-  const normalized = (status || "pending").toLowerCase().trim();
-  if (["pago", "paid"].includes(normalized)) return "paid";
-  if (["cancelado", "canceled", "cancelled"].includes(normalized)) return "canceled";
-  return "pending";
+function normalizeAccountKey(value?: string | null) {
+  return (value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findPaymentAccount(accounts: CashAccount[], name?: string | null) {
+  const key = normalizeAccountKey(name);
+  if (!key) return null;
+  return accounts.find((account) => {
+    const candidates = [
+      account.name,
+      account.bank_name,
+      [account.bank_name, account.account_number].filter(Boolean).join(" "),
+    ];
+    return candidates.some((candidate) => normalizeAccountKey(candidate) === key);
+  }) || null;
+}
+
+function buildDueDate(month: string, dueDay: number | null) {
+  const [year, monthNumber] = month.slice(0, 10).split("-").map(Number);
+  const safeDay = Math.min(Math.max(dueDay || 1, 1), new Date(year, monthNumber, 0).getDate());
+  return `${year}-${String(monthNumber).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
 }
 
 export function CostsImportModal() {
@@ -70,7 +92,18 @@ export function CostsImportModal() {
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { organizationId } = useAuth();
+  const { organizationId, user } = useAuth();
+  const { data: cashAccounts = [] } = useCashAccounts();
+
+  const displayRows = useMemo(() => rows.map((row) => {
+    if (!row.impactCash || row._error) return row;
+    const account = findPaymentAccount(cashAccounts, row.paymentAccountName);
+    if (account) return row;
+    return {
+      ...row,
+      _error: `Conta de pagamento não encontrada: ${row.paymentAccountName || "não informada"}`,
+    };
+  }), [cashAccounts, rows]);
 
   const reset = () => {
     setRows([]);
@@ -93,9 +126,10 @@ export function CostsImportModal() {
       return;
     }
 
-    for (const row of rows.filter((item) => !item._error)) {
+    for (const row of displayRows.filter((item) => !item._error)) {
+      const paymentAccount = row.impactCash ? findPaymentAccount(cashAccounts, row.paymentAccountName) : null;
       if (row.type === "fixed") {
-        const { error } = await supabase.from("recurring_fixed_costs" as any).insert({
+        const { data, error } = await supabase.from("recurring_fixed_costs" as any).insert({
           organization_id: orgId,
           category: row.category,
           name: row.name,
@@ -105,25 +139,81 @@ export function CostsImportModal() {
           due_date_day: row.dueDay || 1,
           status: "active",
           active: true,
-        } as any);
-        if (error) errors.push(`${row.name}: ${error.message}`); else success++;
+        } as any).select().single();
+        if (error) {
+          errors.push(`${row.name}: ${error.message}`);
+        } else {
+          if (row.status === "paid") {
+            const dueDate = buildDueDate(row.month, row.dueDay);
+            const { data: payment, error: paymentError } = await supabase.from("fixed_cost_payments" as any).insert({
+              recurring_fixed_cost_id: data.id,
+              organization_id: orgId,
+              reference_month: row.month,
+              due_date: dueDate,
+              amount: row.amount,
+              status: "paid",
+              paid_at: row.paidAt,
+              cash_account_id: paymentAccount?.id || null,
+              notes: row.description,
+              created_by: user?.id || null,
+            } as any).select().single();
+            if (paymentError) {
+              errors.push(`${row.name}: ${paymentError.message}`);
+              continue;
+            }
+            if (row.impactCash && paymentAccount) {
+              await upsertCashMovement({
+                cashAccountId: paymentAccount.id,
+                movementType: "expense",
+                amount: -Math.abs(Number(row.amount)),
+                movementDate: row.paidAt || row.month,
+                description: row.name,
+                sourceType: "fixed_cost_payment",
+                sourceId: payment.id,
+                organizationId: orgId,
+                userId: user?.id,
+              });
+            }
+          }
+          success++;
+        }
       } else {
-        const { error } = await supabase.from("variable_costs").insert({
+        const { data, error } = await supabase.from("variable_costs").insert({
           organization_id: orgId,
           category: row.category,
           name: row.name,
           amount: row.amount,
           month: row.month,
           description: row.description,
-          status: normalizeVariableStatus(row.status),
-        } as any);
-        if (error) errors.push(`${row.name}: ${error.message}`); else success++;
+          status: row.status,
+          paid_at: row.status === "paid" ? row.paidAt : null,
+          cash_account_id: row.impactCash ? paymentAccount?.id || null : null,
+        } as any).select().single();
+        if (error) {
+          errors.push(`${row.name}: ${error.message}`);
+        } else {
+          if (row.status === "paid" && row.impactCash && paymentAccount) {
+            await upsertCashMovement({
+              cashAccountId: paymentAccount.id,
+              movementType: "expense",
+              amount: -Math.abs(Number(row.amount)),
+              movementDate: row.paidAt || row.month,
+              description: row.name || row.description || "Pagamento de custo variável",
+              sourceType: "variable_cost",
+              sourceId: data.id,
+              organizationId: orgId,
+              userId: user?.id,
+            });
+          }
+          success++;
+        }
       }
     }
 
     queryClient.invalidateQueries({ queryKey: ["fixed_costs"] });
     queryClient.invalidateQueries({ queryKey: ["variable_costs"] });
     queryClient.invalidateQueries({ queryKey: ["cash_accounts"] });
+    queryClient.invalidateQueries({ queryKey: ["cash_movements"] });
 
     setImporting(false);
     setDone(true);
@@ -135,10 +225,10 @@ export function CostsImportModal() {
     if (!errors.length) setTimeout(() => setOpen(false), 1500);
   };
 
-  const validCount = rows.filter((row) => !row._error).length;
-  const errorCount = rows.filter((row) => row._error).length;
-  const fixedCount = rows.filter((row) => !row._error && row.type === "fixed").length;
-  const variableCount = rows.filter((row) => !row._error && row.type === "variable").length;
+  const validCount = displayRows.filter((row) => !row._error).length;
+  const errorCount = displayRows.filter((row) => row._error).length;
+  const fixedCount = displayRows.filter((row) => !row._error && row.type === "fixed").length;
+  const variableCount = displayRows.filter((row) => !row._error && row.type === "variable").length;
 
   return (
     <Dialog open={open} onOpenChange={(value) => { setOpen(value); if (!value) reset(); }}>
@@ -156,10 +246,10 @@ export function CostsImportModal() {
         <div className="rounded-lg border p-4 space-y-2">
           <p className="text-sm font-medium">1. Baixe o template unificado e preencha os dados</p>
           <p className="text-xs text-muted-foreground">
-            Colunas: tipo, nome, categoria, valor, mes (YYYY-MM-DD), dia_vencimento, descricao, status
+            Colunas: tipo, nome, categoria, valor, mes, dia_vencimento, descricao, status, data_pagamento, conta_pagamento, impactar_caixa
           </p>
           <p className="text-xs text-muted-foreground">
-            Tipo aceita: fixo ou variavel. Dia de vencimento é obrigatório apenas para fixos.
+            Tipo aceita: fixo ou variavel. Se status for pago, informe data_pagamento. Para gerar caixa, use impactar_caixa = sim e informe conta_pagamento.
           </p>
           <p className="text-xs text-muted-foreground">
             Categorias válidas: {COST_CATEGORY_OPTIONS.join(", ")}
@@ -197,9 +287,9 @@ export function CostsImportModal() {
           </div>
         </div>
 
-        {rows.length > 0 && <UnifiedPreview rows={rows} onClear={() => setRows([])} />}
+        {displayRows.length > 0 && <UnifiedPreview rows={displayRows} onClear={() => setRows([])} />}
 
-        {rows.length > 0 && (
+        {displayRows.length > 0 && (
           <div className="space-y-2 pt-2">
             <div className="flex items-center justify-between text-sm">
               <span className="font-medium">
@@ -245,6 +335,8 @@ function UnifiedPreview({ rows, onClear }: { rows: ParsedUnifiedCostRow[]; onCle
               <TableHead>Mês</TableHead>
               <TableHead>Vencimento</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Pagamento</TableHead>
+              <TableHead>Caixa</TableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
@@ -262,6 +354,8 @@ function UnifiedPreview({ rows, onClear }: { rows: ParsedUnifiedCostRow[]; onCle
                 <TableCell className="text-xs">{row.month || "-"}</TableCell>
                 <TableCell>{row.dueDay || "-"}</TableCell>
                 <TableCell>{row.status || "-"}</TableCell>
+                <TableCell>{row.paidAt || "-"}</TableCell>
+                <TableCell>{row.impactCash ? row.paymentAccountName || "-" : "Não"}</TableCell>
                 <TableCell>
                   {row._error
                     ? <AlertTriangle className="h-4 w-4 text-destructive" aria-label={row._error} />

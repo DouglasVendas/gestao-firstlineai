@@ -12,6 +12,7 @@ describe("unified cost import", () => {
         mes: "2026-05-01",
         dia_vencimento: "10",
         descricao: "Pagamento mensal",
+        status: "pendente",
       },
       {
         tipo: "variavel",
@@ -20,6 +21,10 @@ describe("unified cost import", () => {
         valor: "997",
         mes: "2026-05-13",
         descricao: "Campanha maio",
+        status: "pago",
+        data_pagamento: "2026-05-13",
+        conta_pagamento: "Santander PJ",
+        impactar_caixa: "sim",
       },
     ]);
 
@@ -32,6 +37,10 @@ describe("unified cost import", () => {
       month: "2026-05-01",
       dueDay: 10,
       description: "Pagamento mensal",
+      status: "pending",
+      paidAt: null,
+      paymentAccountName: null,
+      impactCash: false,
     });
     expect(rows[1]).toMatchObject({
       type: "variable",
@@ -41,6 +50,10 @@ describe("unified cost import", () => {
       month: "2026-05-13",
       dueDay: null,
       description: "Campanha maio",
+      status: "paid",
+      paidAt: "2026-05-13",
+      paymentAccountName: "Santander PJ",
+      impactCash: true,
     });
   });
 
@@ -55,5 +68,18 @@ describe("unified cost import", () => {
     expect(rows[1]._error).toContain("Dia de vencimento obrigatório");
     expect(rows[2]._error).toBeUndefined();
     expect(rows[2].type).toBe("variable");
+  });
+
+  it("requires payment date for paid rows and account only when cash impact is enabled", () => {
+    const rows = parseUnifiedCostRows([
+      { tipo: "variavel", nome: "Pago sem data", categoria: "Pessoas", valor: "100", mes: "2026-05-01", status: "pago" },
+      { tipo: "variavel", nome: "Impacta caixa sem conta", categoria: "Pessoas", valor: "100", mes: "2026-05-01", status: "pago", data_pagamento: "2026-05-01", impactar_caixa: "sim" },
+      { tipo: "variavel", nome: "Histórico sem caixa", categoria: "Pessoas", valor: "100", mes: "2026-05-01", status: "pago", data_pagamento: "2026-05-01", impactar_caixa: "nao" },
+    ]);
+
+    expect(rows[0]._error).toContain("Data de pagamento obrigatória");
+    expect(rows[1]._error).toContain("Conta de pagamento obrigatória");
+    expect(rows[2]._error).toBeUndefined();
+    expect(rows[2].impactCash).toBe(false);
   });
 });
