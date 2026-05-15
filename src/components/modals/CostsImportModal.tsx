@@ -11,7 +11,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Upload, FileDown, Loader2, CheckCircle, AlertTriangle, X } from "lucide-react";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Upload, FileDown, Loader2, CheckCircle, AlertTriangle, X, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -73,10 +74,28 @@ function findPaymentAccount(accounts: CashAccount[], name?: string | null) {
       account.bank_name,
       [account.bank_name, account.account_number].filter(Boolean).join(" "),
     ];
-    return candidates.some((candidate) => normalizeAccountKey(candidate) === key);
+    return candidates.some((candidate) => {
+      const candidateKey = normalizeAccountKey(candidate);
+      return candidateKey === key || candidateKey.includes(key) || key.includes(candidateKey);
+    });
   }) || null;
 }
 
+
+function getErrorSummary(rows: ParsedUnifiedCostRow[]) {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (!row._error) continue;
+    for (const reason of row._error.split(";").map((item) => item.trim()).filter(Boolean)) {
+      counts.set(reason, (counts.get(reason) || 0) + 1);
+    }
+  }
+  return Array.from(counts.entries()).map(([reason, count]) => ({ reason, count }));
+}
+
+function availableAccountNames(accounts: CashAccount[]) {
+  return accounts.map((account) => account.name).filter(Boolean).join(", ");
+}
 function buildDueDate(month: string, dueDay: number | null) {
   const [year, monthNumber] = month.slice(0, 10).split("-").map(Number);
   const safeDay = Math.min(Math.max(dueDay || 1, 1), new Date(year, monthNumber, 0).getDate());
@@ -227,6 +246,7 @@ export function CostsImportModal() {
 
   const validCount = displayRows.filter((row) => !row._error).length;
   const errorCount = displayRows.filter((row) => row._error).length;
+  const errorSummary = getErrorSummary(displayRows);
   const fixedCount = displayRows.filter((row) => !row._error && row.type === "fixed").length;
   const variableCount = displayRows.filter((row) => !row._error && row.type === "variable").length;
 
@@ -238,11 +258,12 @@ export function CostsImportModal() {
           Importar Custos
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[820px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="w-[96vw] max-w-[1180px] h-[90vh] overflow-hidden p-0">
+        <DialogHeader className="px-6 pt-6 pb-3 border-b">
           <DialogTitle>Importar Custos e Despesas via Planilha</DialogTitle>
         </DialogHeader>
 
+        <div className="h-[calc(90vh-88px)] overflow-y-auto px-6 pb-6 space-y-4">
         <div className="rounded-lg border p-4 space-y-2">
           <p className="text-sm font-medium">1. Baixe o template unificado e preencha os dados</p>
           <p className="text-xs text-muted-foreground">
@@ -287,6 +308,14 @@ export function CostsImportModal() {
           </div>
         </div>
 
+        {displayRows.length > 0 && (
+          <ImportValidationSummary
+            rows={displayRows}
+            errorSummary={errorSummary}
+            accountNames={availableAccountNames(cashAccounts)}
+          />
+        )}
+
         {displayRows.length > 0 && <UnifiedPreview rows={displayRows} onClear={() => setRows([])} />}
 
         {displayRows.length > 0 && (
@@ -310,8 +339,55 @@ export function CostsImportModal() {
             )}
           </div>
         )}
+        </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ImportValidationSummary({
+  rows,
+  errorSummary,
+  accountNames,
+}: {
+  rows: ParsedUnifiedCostRow[];
+  errorSummary: { reason: string; count: number }[];
+  accountNames: string;
+}) {
+  const validCount = rows.filter((row) => !row._error).length;
+  const errorCount = rows.filter((row) => row._error).length;
+
+  return (
+    <div className="grid gap-3 md:grid-cols-[1fr_1.2fr]">
+      <div className="rounded-lg border bg-muted/20 p-4">
+        <div className="flex items-start gap-2">
+          <Info className="h-4 w-4 text-primary mt-0.5" />
+          <div className="space-y-1 text-sm">
+            <p className="font-medium">Validação do arquivo</p>
+            <p className="text-muted-foreground">
+              {validCount} linhas prontas para importar. {errorCount} linhas precisam correção.
+            </p>
+            {accountNames && (
+              <p className="text-xs text-muted-foreground">Contas reconhecidas: {accountNames}</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {errorSummary.length > 0 && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+          <p className="text-sm font-medium text-destructive mb-2">Erros encontrados</p>
+          <div className="space-y-1 text-sm">
+            {errorSummary.map((item) => (
+              <div key={item.reason} className="flex items-start justify-between gap-3">
+                <span className="text-muted-foreground">{item.reason}</span>
+                <Badge variant="destructive">{item.count}</Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -324,47 +400,57 @@ function UnifiedPreview({ rows, onClear }: { rows: ParsedUnifiedCostRow[]; onCle
           <X className="h-4 w-4 mr-1" /> Limpar
         </Button>
       </div>
-      <div className="rounded-lg border overflow-auto max-h-[280px]">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Tipo</TableHead>
-              <TableHead>Nome</TableHead>
-              <TableHead>Categoria</TableHead>
-              <TableHead className="text-right">Valor</TableHead>
-              <TableHead>Mês</TableHead>
-              <TableHead>Vencimento</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Pagamento</TableHead>
-              <TableHead>Caixa</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row, index) => (
-              <TableRow key={`${row.name}-${index}`} className={row._error ? "bg-destructive/5" : ""}>
-                <TableCell>
-                  <Badge variant={row.type === "fixed" ? "default" : "outline"}>
-                    {row.type === "fixed" ? "Fixo" : "Variável"}
-                  </Badge>
-                </TableCell>
-                <TableCell className="font-medium">{row.name || "-"}</TableCell>
-                <TableCell><Badge variant="outline">{row.category || "-"}</Badge></TableCell>
-                <TableCell className="text-right">{row.amount ? `R$ ${row.amount.toLocaleString("pt-BR")}` : "-"}</TableCell>
-                <TableCell className="text-xs">{row.month || "-"}</TableCell>
-                <TableCell>{row.dueDay || "-"}</TableCell>
-                <TableCell>{row.status || "-"}</TableCell>
-                <TableCell>{row.paidAt || "-"}</TableCell>
-                <TableCell>{row.impactCash ? row.paymentAccountName || "-" : "Não"}</TableCell>
-                <TableCell>
-                  {row._error
-                    ? <AlertTriangle className="h-4 w-4 text-destructive" aria-label={row._error} />
-                    : <CheckCircle className="h-4 w-4 text-success" />}
-                </TableCell>
+      <div className="rounded-lg border">
+        <ScrollArea className="h-[420px] w-full">
+          <Table className="min-w-[1180px] table-fixed">
+            <TableHeader className="sticky top-0 z-10 bg-background">
+              <TableRow>
+                <TableHead className="w-[100px]">Tipo</TableHead>
+                <TableHead className="w-[240px]">Nome</TableHead>
+                <TableHead className="w-[190px]">Categoria</TableHead>
+                <TableHead className="w-[110px] text-right">Valor</TableHead>
+                <TableHead className="w-[110px]">Mês</TableHead>
+                <TableHead className="w-[105px]">Venc.</TableHead>
+                <TableHead className="w-[95px]">Status</TableHead>
+                <TableHead className="w-[125px]">Pagamento</TableHead>
+                <TableHead className="w-[150px]">Caixa</TableHead>
+                <TableHead className="w-[270px]">Validação</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row, index) => (
+                <TableRow key={`${row.name}-${index}`} className={row._error ? "bg-destructive/5" : ""}>
+                  <TableCell>
+                    <Badge variant={row.type === "fixed" ? "default" : "outline"}>
+                      {row.type === "fixed" ? "Fixo" : "Variável"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="font-medium whitespace-normal break-words">{row.name || "-"}</TableCell>
+                  <TableCell><Badge variant="outline" className="whitespace-normal text-left">{row.category || "-"}</Badge></TableCell>
+                  <TableCell className="text-right">{row.amount ? `R$ ${row.amount.toLocaleString("pt-BR")}` : "-"}</TableCell>
+                  <TableCell className="text-xs">{row.month || "-"}</TableCell>
+                  <TableCell>{row.dueDay || "-"}</TableCell>
+                  <TableCell>{row.status || "-"}</TableCell>
+                  <TableCell>{row.paidAt || "-"}</TableCell>
+                  <TableCell className="whitespace-normal break-words">{row.impactCash ? row.paymentAccountName || "-" : "Não"}</TableCell>
+                  <TableCell>
+                    {row._error ? (
+                      <div className="flex items-start gap-2 text-xs text-destructive">
+                        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                        <span className="whitespace-normal break-words">{row._error}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-xs text-success">
+                        <CheckCircle className="h-4 w-4" /> OK
+                      </div>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <ScrollBar orientation="horizontal" />
+        </ScrollArea>
       </div>
     </div>
   );
