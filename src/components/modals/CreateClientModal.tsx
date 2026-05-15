@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -29,9 +29,14 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { useCreateClient } from "@/hooks/useClients";
-import { usePlans } from "@/hooks/usePlans";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Plus } from "lucide-react";
+import { ClientSubscriptionsForm } from "@/components/clients/ClientSubscriptionsForm";
+import {
+    calculateSubscriptionsMrr,
+    ClientSubscriptionInput,
+    useProductCatalog,
+} from "@/hooks/useClientSubscriptions";
 
 // Schema validation
 const formSchema = z.object({
@@ -42,15 +47,22 @@ const formSchema = z.object({
     contract_duration: z.coerce.number().min(1, "Duração mínima de 1 mês.").default(12),
     start_date: z.string().optional(),
     billing_cycle: z.enum(["monthly", "bimonthly", "quarterly", "semiannual", "yearly"]).default("monthly"),
-    plan_id: z.string().optional(),
-    products: z.array(z.string()).default(["CRM"]),
+    subscriptions: z.array(z.custom<ClientSubscriptionInput>()).default([]),
 });
 
 export function CreateClientModal() {
     const [open, setOpen] = useState(false);
     const createClient = useCreateClient();
-    const { data: plans } = usePlans();
+    const { data: catalog = [] } = useProductCatalog();
     const { toast } = useToast();
+
+    const CYCLE_MONTHS: Record<string, number | null> = {
+        monthly: null,
+        bimonthly: 2,
+        quarterly: 3,
+        semiannual: 6,
+        yearly: 12,
+    };
 
     const form = useForm<z.infer<typeof formSchema>>({
         resolver: zodResolver(formSchema),
@@ -62,10 +74,21 @@ export function CreateClientModal() {
             contract_duration: 12,
             start_date: new Date().toISOString().split("T")[0],
             billing_cycle: "monthly",
-            plan_id: "",
-            products: ["CRM"],
+            subscriptions: [],
         },
     });
+
+    const billingCycle = form.watch("billing_cycle");
+    const subscriptions = form.watch("subscriptions") || [];
+    const startDate = form.watch("start_date") || new Date().toISOString().split("T")[0];
+    const totalMrr = calculateSubscriptionsMrr(subscriptions);
+
+    useEffect(() => {
+        const months = CYCLE_MONTHS[billingCycle];
+        if (months !== null && months !== undefined) {
+            form.setValue("contract_duration", months);
+        }
+    }, [billingCycle]);
 
     const onSubmit = (values: z.infer<typeof formSchema>) => {
         createClient.mutate(
@@ -73,15 +96,15 @@ export function CreateClientModal() {
                 name: values.name,
                 email: values.email || null,
                 status: values.status,
-                mrr: values.mrr,
                 contract_duration: values.contract_duration,
                 start_date: values.start_date || null,
-                plan_id: values.plan_id || undefined,
+                plan_id: undefined,
                 billing_cycle: values.billing_cycle,
-                products: values.products,
+                products: [],
+                subscriptions: values.subscriptions,
+                mrr: calculateSubscriptionsMrr(values.subscriptions),
                 churn_date: null,
                 churn_reason: null,
-                voluntary: null,
             },
             {
                 onSuccess: () => {
@@ -111,7 +134,7 @@ export function CreateClientModal() {
                     Novo Cliente
                 </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[500px]">
+            <DialogContent className="sm:max-w-[760px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>Novo Cliente</DialogTitle>
                     <DialogDescription>
@@ -136,29 +159,29 @@ export function CreateClientModal() {
                         />
 
                         <div className="grid grid-cols-2 gap-4">
-                            <FormField
-                                control={form.control}
-                                name="mrr"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>MRR (R$) *</FormLabel>
-                                        <FormControl>
-                                            <Input type="number" step="0.01" {...field} />
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
+                            <FormItem>
+                                <FormLabel>MRR calculado</FormLabel>
+                                <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm font-medium">
+                                    {totalMrr.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                                </div>
+                            </FormItem>
 
                             <FormField
                                 control={form.control}
                                 name="contract_duration"
                                 render={({ field }) => (
                                     <FormItem>
-                                        <FormLabel>Duração (meses)</FormLabel>
-                                        <FormControl>
-                                            <Input type="number" min="1" {...field} />
-                                        </FormControl>
+                                        <FormLabel>Duração do Ciclo</FormLabel>
+                                        {billingCycle === "monthly" ? (
+                                            <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">
+                                                Recorrente (sem data de fim)
+                                            </div>
+                                        ) : (
+                                            <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm font-medium">
+                                                {CYCLE_MONTHS[billingCycle]} meses (automático)
+                                            </div>
+                                        )}
+                                        <input type="hidden" {...field} />
                                         <FormMessage />
                                     </FormItem>
                                 )}
@@ -195,34 +218,6 @@ export function CreateClientModal() {
                         <div className="grid grid-cols-2 gap-4">
                             <FormField
                                 control={form.control}
-                                name="plan_id"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Plano</FormLabel>
-                                        <Select
-                                            onValueChange={field.onChange}
-                                            defaultValue={field.value}
-                                        >
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Selecione..." />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                {plans?.map((plan) => (
-                                                    <SelectItem key={plan.id} value={plan.id}>
-                                                        {plan.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-
-                            <FormField
-                                control={form.control}
                                 name="billing_cycle"
                                 render={({ field }) => (
                                     <FormItem>
@@ -252,58 +247,15 @@ export function CreateClientModal() {
 
                         <FormField
                             control={form.control}
-                            name="products"
+                            name="subscriptions"
                             render={() => (
                                 <FormItem>
-                                    <div className="mb-4">
-                                        <FormLabel className="text-base">Produtos Contratados</FormLabel>
-                                    </div>
-                                    <div className="flex flex-row items-center justify-between rounded-lg border p-4">
-                                        <div className="space-y-0.5">
-                                            <FormLabel className="text-base">
-                                                CRM (Sales Hub)
-                                            </FormLabel>
-                                        </div>
-                                        <FormControl>
-                                            <input
-                                                type="checkbox"
-                                                className="accent-primary h-5 w-5"
-                                                checked={form.watch("products")?.includes("CRM")}
-                                                onChange={(e) => {
-                                                    const checked = e.target.checked;
-                                                    const current = form.getValues("products") || [];
-                                                    if (checked) {
-                                                        form.setValue("products", [...current, "CRM"]);
-                                                    } else {
-                                                        form.setValue("products", current.filter((p) => p !== "CRM"));
-                                                    }
-                                                }}
-                                            />
-                                        </FormControl>
-                                    </div>
-                                    <div className="flex flex-row items-center justify-between rounded-lg border p-4 mt-2">
-                                        <div className="space-y-0.5">
-                                            <FormLabel className="text-base">
-                                                Auditoria (Audit Hub)
-                                            </FormLabel>
-                                        </div>
-                                        <FormControl>
-                                            <input
-                                                type="checkbox"
-                                                className="accent-primary h-5 w-5"
-                                                checked={form.watch("products")?.includes("Auditoria")}
-                                                onChange={(e) => {
-                                                    const checked = e.target.checked;
-                                                    const current = form.getValues("products") || [];
-                                                    if (checked) {
-                                                        form.setValue("products", [...current, "Auditoria"]);
-                                                    } else {
-                                                        form.setValue("products", current.filter((p) => p !== "Auditoria"));
-                                                    }
-                                                }}
-                                            />
-                                        </FormControl>
-                                    </div>
+                                    <ClientSubscriptionsForm
+                                        catalog={catalog}
+                                        value={subscriptions}
+                                        onChange={(value) => form.setValue("subscriptions", value, { shouldDirty: true, shouldValidate: true })}
+                                        defaultStartDate={startDate}
+                                    />
                                     <FormMessage />
                                 </FormItem>
                             )}

@@ -100,7 +100,7 @@ export function CreateBudgetModal() {
                                 <FormItem>
                                     <FormLabel>Categoria *</FormLabel>
                                     <FormControl>
-                                        <Input placeholder="Ex: Marketing" {...field} />
+                                        <Input placeholder="Ex: Comercial e Marketing" {...field} />
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>

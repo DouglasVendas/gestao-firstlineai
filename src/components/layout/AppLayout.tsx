@@ -5,7 +5,7 @@ import { NotificationsDropdown } from "@/components/header/NotificationsDropdown
 import { UserDropdown } from "@/components/header/UserDropdown";
 import { useFinancialData } from "@/contexts/FinancialContext";
 import { usePageTitle } from "@/contexts/PageTitleContext";
-import { MonthPicker } from "@/components/common/MonthPicker";
+import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { Outlet } from "react-router-dom";
 
 interface AppLayoutProps {
@@ -14,7 +14,7 @@ interface AppLayoutProps {
 }
 
 export function AppLayout({ title: propTitle, subtitle: propSubtitle }: AppLayoutProps) {
-  const { selectedMonth, setSelectedMonth } = useFinancialData();
+  const { dateRange, setDateRange, setSelectedMonth } = useFinancialData();
   const { title: contextTitle, subtitle: contextSubtitle } = usePageTitle();
 
   // Use prop title if provided, otherwise use context title
@@ -40,7 +40,13 @@ export function AppLayout({ title: propTitle, subtitle: propSubtitle }: AppLayou
           <div className="flex items-center gap-4">
             {/* Global Date Filter */}
             <div className="hidden md:block">
-              <MonthPicker date={selectedMonth} setDate={setSelectedMonth} />
+              <DatePickerWithRange
+                date={dateRange}
+                onDateChange={(range) => {
+                  setDateRange(range);
+                  if (range?.from) setSelectedMonth(range.from);
+                }}
+              />
             </div>
 
             {/* Search */}

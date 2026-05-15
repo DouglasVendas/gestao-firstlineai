@@ -23,7 +23,7 @@ import { useFinancialData } from "@/contexts/FinancialContext";
 import { useFinancialSnapshot } from "@/hooks/useFinancialMetrics";
 
 export function ValuationContent() {
-    const { isLoading: isLoadingData } = useFinancialData();
+    const { settings, isLoading: isLoadingData } = useFinancialData();
     const { current } = useFinancialSnapshot();
 
     const isLoading = isLoadingData;
@@ -33,6 +33,7 @@ export function ValuationContent() {
         ebitdaMargin: 5,
         nrr: 112,
         multiplo: 10,
+        privateDiscount: settings?.private_discount !== undefined ? settings.private_discount * 100 : 20,
         wacc: 15,
         terminalGrowth: 3,
     });
@@ -56,7 +57,7 @@ export function ValuationContent() {
     const growthAdjustment = inputs.growthRate > 50 ? 0.2 : inputs.growthRate > 30 ? 0.1 : 0;
     const nrrAdjustment = inputs.nrr > 110 ? 0.1 : inputs.nrr > 100 ? 0.05 : 0;
     const marginAdjustment = inputs.ebitdaMargin > 10 ? 0.05 : 0;
-    const privateDiscount = 0.2;
+    const privateDiscount = inputs.privateDiscount / 100;
 
     const adjustedValuation = baseValuation * (1 + growthAdjustment + nrrAdjustment + marginAdjustment) * (1 - privateDiscount);
 
@@ -186,6 +187,17 @@ export function ValuationContent() {
                                             min={3}
                                             max={25}
                                             step={1}
+                                        />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Label>Desconto Empresa Privada: {inputs.privateDiscount}%</Label>
+                                        <Slider
+                                            value={[inputs.privateDiscount]}
+                                            onValueChange={([v]) => setInputs({ ...inputs, privateDiscount: v })}
+                                            min={0}
+                                            max={50}
+                                            step={5}
                                         />
                                     </div>
                                 </div>

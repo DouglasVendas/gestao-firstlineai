@@ -20,6 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { normalizeCostCategory } from "@/lib/costCategories";
 
 interface ImportRow {
     tipo: "receita" | "custo_fixo" | "custo_variavel";
@@ -207,17 +208,19 @@ export default function ImportData() {
 
             // 3. Process Fixed Costs
             const fixed: Database['public']['Tables']['fixed_costs']['Insert'][] = data.filter(d => d.tipo === "custo_fixo").map(d => ({
+                name: d.descricao_ou_categoria,
                 actual: d.valor,
                 month: `${d.data.substring(0, 7)}-01`,
-                category: d.descricao_ou_categoria,
+                category: normalizeCostCategory(d.descricao_ou_categoria),
                 budgeted: d.valor
             }));
 
             // 4. Process Variable Costs
             const variable: Database['public']['Tables']['variable_costs']['Insert'][] = data.filter(d => d.tipo === "custo_variavel").map(d => ({
+                name: d.descricao_ou_categoria,
                 amount: d.valor,
                 month: `${d.data.substring(0, 7)}-01`,
-                category: d.descricao_ou_categoria,
+                category: normalizeCostCategory(d.descricao_ou_categoria),
             }));
 
             if (revenues.length > 0) {
@@ -264,7 +267,7 @@ export default function ImportData() {
     };
 
     const downloadTemplate = () => {
-        const csvContent = "data:text/csv;charset=utf-8,tipo,descricao,valor,data,status,cliente,plano\nreceita,Assinatura Mensal,150.00,2024-05-20,pago,Cliente A,Basic\ncusto_fixo,Aluguel,2000.00,2024-05-05,pago,,\ncusto_variavel,Comissão,300.00,2024-05-10,pago,,";
+        const csvContent = "data:text/csv;charset=utf-8,tipo,descricao,valor,data,status,cliente,plano\nreceita,Assinatura Mensal,150.00,2024-05-20,pago,Cliente A,Basic\ncusto_fixo,Administrativo,2000.00,2024-05-05,pago,,\ncusto_variavel,Comercial e Marketing,300.00,2024-05-10,pago,,";
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
         link.setAttribute("href", encodedUri);

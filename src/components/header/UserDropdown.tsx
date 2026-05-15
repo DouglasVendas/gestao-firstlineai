@@ -18,6 +18,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useAuth } from "@/contexts/auth/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 interface UserDropdownProps {
   user?: {
@@ -38,12 +40,19 @@ const defaultUser = {
 };
 
 export function UserDropdown({ user = defaultUser }: UserDropdownProps) {
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
   const initials = user.name
     .split(" ")
     .map((n) => n[0])
     .join("")
     .toUpperCase()
     .slice(0, 2);
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/login", { replace: true });
+  };
 
   return (
     <DropdownMenu>
@@ -102,7 +111,10 @@ export function UserDropdown({ user = defaultUser }: UserDropdownProps) {
           Central de Ajuda
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive focus:text-destructive">
+        <DropdownMenuItem
+          className="text-destructive focus:text-destructive"
+          onClick={handleSignOut}
+        >
           <LogOut className="mr-2 h-4 w-4" />
           Sair
         </DropdownMenuItem>

@@ -1,8 +1,19 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, DollarSign, Wallet, Download, Loader2, Calendar as CalendarIcon } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Wallet, Download, Loader2, Calendar as CalendarIcon, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import {
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+    AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { EditTransactionModal } from "@/components/modals/EditTransactionModal";
+import { useDeleteTransaction } from "@/hooks/useUpdateTransaction";
+import { Transaction } from "@/hooks/useTransactions";
+import { useToast } from "@/hooks/use-toast";
 import {
     AreaChart,
     Area,
@@ -16,6 +27,7 @@ import {
     Legend,
 } from "recharts";
 import { useFinancialData } from "@/contexts/FinancialContext";
+import { getCostDisplayName } from "@/lib/costNames";
 import { cn } from "@/lib/utils";
 import { CreateTransactionModal } from "@/components/modals/CreateTransactionModal";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
@@ -57,6 +69,10 @@ const formatDate = (date: string) => {
 
 export function CashflowContent() {
     const { invoices, fixedCosts, variableCosts, transactions, selectedMonth, setSelectedMonth, dateRange, setDateRange, isLoading } = useFinancialData();
+    const deleteTransaction = useDeleteTransaction();
+    const { toast } = useToast();
+    const [editTarget, setEditTarget] = useState<Transaction | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
 
     const selectedMonthStr = useMemo(() => format(selectedMonth, 'yyyy-MM'), [selectedMonth]);
 
@@ -85,12 +101,12 @@ export function CashflowContent() {
             if (fc.month) {
                 items.push({
                     id: `fc-${fc.id}`,
-                    description: fc.description,
+                    description: getCostDisplayName(fc),
                     category: fc.category,
                     amount: fc.actual,
                     type: 'saida',
-                    date: fc.month, // fc.month is already YYYY-MM-DD from DB
-                    status: 'completed'
+                    date: fc.due_date || fc.month,
+                    status: fc.status === 'paid' ? 'completed' : 'pending'
                 });
             }
         });
@@ -100,7 +116,7 @@ export function CashflowContent() {
             if (vc.month) {
                 items.push({
                     id: `vc-${vc.id}`,
-                    description: vc.description || vc.category,
+                    description: getCostDisplayName(vc),
                     category: vc.category,
                     amount: vc.amount,
                     type: 'saida',
@@ -203,51 +219,91 @@ export function CashflowContent() {
 
     const sumCategory = (items: CashflowItem[]) => items.reduce((acc, i) => acc + i.amount, 0);
 
-    const renderTransactionItem = (transaction: CashflowItem) => (
-        <div
-            key={transaction.id}
-            className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-muted/50 transition-colors mb-2"
-        >
-            <div className="flex items-center gap-4">
-                <div
-                    className={cn(
-                        "flex h-8 w-8 items-center justify-center rounded-full",
-                        transaction.type === "entrada"
-                            ? "bg-success/10 text-success"
-                            : "bg-destructive/10 text-destructive"
-                    )}
-                >
-                    {transaction.type === "entrada" ? (
-                        <TrendingUp className="h-4 w-4" />
-                    ) : (
-                        <TrendingDown className="h-4 w-4" />
+    const handleDelete = () => {
+        if (!deleteTarget) return;
+        deleteTransaction.mutate(deleteTarget.id, {
+            onSuccess: () => {
+                toast({ title: "Transação excluída", description: `"${deleteTarget.description}" foi removida.` });
+                setDeleteTarget(null);
+            },
+            onError: (err) => toast({ variant: "destructive", title: "Erro ao excluir", description: err.message }),
+        });
+    };
+
+    const renderTransactionItem = (transaction: CashflowItem) => {
+        // Only transactions from the 'transactions' table are editable/deletable
+        const isRealTransaction = transaction.id.startsWith('tx-');
+        const originalTxId = isRealTransaction ? transaction.id.replace('tx-', '') : null;
+        const originalTx = originalTxId ? transactions.find(t => t.id === originalTxId) ?? null : null;
+
+        return (
+            <div
+                key={transaction.id}
+                className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-muted/50 transition-colors mb-2"
+            >
+                <div className="flex items-center gap-4">
+                    <div
+                        className={cn(
+                            "flex h-8 w-8 items-center justify-center rounded-full",
+                            transaction.type === "entrada"
+                                ? "bg-success/10 text-success"
+                                : "bg-destructive/10 text-destructive"
+                        )}
+                    >
+                        {transaction.type === "entrada" ? (
+                            <TrendingUp className="h-4 w-4" />
+                        ) : (
+                            <TrendingDown className="h-4 w-4" />
+                        )}
+                    </div>
+                    <div>
+                        <p className="font-medium text-sm">{transaction.description}</p>
+                        <p className="text-xs text-muted-foreground">
+                            {transaction.category} • {formatDate(transaction.date)}
+                        </p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <div className="text-right">
+                        <p
+                            className={cn(
+                                "font-semibold text-sm",
+                                transaction.type === "entrada"
+                                    ? "text-success"
+                                    : "text-destructive"
+                            )}
+                        >
+                            {transaction.type === "entrada" ? "+" : "-"}{" "}
+                            {formatCurrency(transaction.amount)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            {transaction.status === "completed" ? "Confirmado" : "Pendente"}
+                        </p>
+                    </div>
+                    {isRealTransaction && originalTx && (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => setEditTarget(originalTx)}>
+                                    <Pencil className="mr-2 h-4 w-4" /> Editar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    onClick={() => setDeleteTarget(originalTx)}
+                                    className="text-destructive focus:text-destructive"
+                                >
+                                    <Trash2 className="mr-2 h-4 w-4" /> Excluir
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                     )}
                 </div>
-                <div>
-                    <p className="font-medium text-sm">{transaction.description}</p>
-                    <p className="text-xs text-muted-foreground">
-                        {transaction.category} • {formatDate(transaction.date)}
-                    </p>
-                </div>
             </div>
-            <div className="text-right">
-                <p
-                    className={cn(
-                        "font-semibold text-sm",
-                        transaction.type === "entrada"
-                            ? "text-success"
-                            : "text-destructive"
-                    )}
-                >
-                    {transaction.type === "entrada" ? "+" : "-"}{" "}
-                    {formatCurrency(transaction.amount)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                    {transaction.status === "completed" ? "Confirmado" : "Pendente"}
-                </p>
-            </div>
-        </div>
-    );
+        );
+    };
 
     const chartData = useMemo(() => {
         const map = new Map<string, { month: string, entradas: number, saidas: number, saldo: number }>();
@@ -329,7 +385,7 @@ export function CashflowContent() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <MetricCard
                     title="Saldo Atual (Caixa)"
-                    value={formatCurrency(0)}
+                    value={formatCurrency(chartData[chartData.length - 1]?.saldo ?? 0)}
                     change={0}
                     icon={Wallet}
                     description="Saldo acumulado total"
@@ -555,6 +611,32 @@ export function CashflowContent() {
                     </div>
                 </CardContent>
             </Card>
+
+            <EditTransactionModal
+                transaction={editTarget}
+                open={!!editTarget}
+                onOpenChange={(v) => !v && setEditTarget(null)}
+            />
+
+            <AlertDialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Excluir transação?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Tem certeza que deseja excluir "{deleteTarget?.description}"? Esta ação não pode ser desfeita.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={handleDelete}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                            Excluir
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

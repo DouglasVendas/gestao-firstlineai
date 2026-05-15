@@ -16,33 +16,40 @@ import { useFinancialData } from "@/contexts/FinancialContext";
 import { useFinancialSnapshot } from "@/hooks/useFinancialMetrics";
 import { formatCurrency } from "@/lib/formatters";
 import { CreateInvoiceModal } from "@/components/modals/CreateInvoiceModal";
-import { isSameMonth, parseISO } from "date-fns";
-import { cn } from "@/lib/utils";
+import { mergeInvoicesInRange } from "@/utils/computeInvoices";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 export function ReceivablesContent() {
-    const { invoices, selectedMonth, isLoading } = useFinancialData();
+    const { invoices, clients, selectedMonth, dateRange, isLoading } = useFinancialData();
     const { current } = useFinancialSnapshot();
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
 
+    const allInvoices = useMemo(() => {
+        return mergeInvoicesInRange(invoices || [], clients || [], dateRange, selectedMonth);
+    }, [invoices, clients, dateRange, selectedMonth]);
+
+    const periodLabel = useMemo(() => {
+        if (!dateRange?.from) {
+            return selectedMonth.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+        }
+
+        const from = format(dateRange.from, 'dd/MM/yyyy', { locale: ptBR });
+        const to = format(dateRange.to ?? dateRange.from, 'dd/MM/yyyy', { locale: ptBR });
+        return `${from} a ${to}`;
+    }, [dateRange, selectedMonth]);
+
     const filteredInvoices = useMemo(() => {
-        if (!invoices) return [];
-        return invoices.filter(inv => {
-            if (inv.due_date && !isSameMonth(parseISO(inv.due_date), selectedMonth)) {
-                return false;
-            }
+        return allInvoices.filter(inv => {
             if (searchTerm) {
-                const clientName = (inv as any).clients?.name || '';
-                if (!clientName.toLowerCase().includes(searchTerm.toLowerCase())) {
-                    return false;
-                }
+                const name = inv.client?.name || '';
+                if (!name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
             }
-            if (statusFilter !== 'all' && inv.status !== statusFilter) {
-                return false;
-            }
+            if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
             return true;
         });
-    }, [invoices, selectedMonth, searchTerm, statusFilter]);
+    }, [allInvoices, searchTerm, statusFilter]);
 
     if (isLoading || !current) {
         return (
@@ -52,10 +59,11 @@ export function ReceivablesContent() {
         );
     }
 
-    const totalInvoicedInMonth = invoices?.filter(inv => isSameMonth(parseISO(inv.due_date), selectedMonth)).reduce((acc, inv) => acc + inv.value, 0) || 0;
-    const monthCount = invoices?.filter(inv => isSameMonth(parseISO(inv.due_date), selectedMonth)).length || 1;
-    const monthOverdueCount = invoices?.filter(inv => isSameMonth(parseISO(inv.due_date), selectedMonth) && inv.status === 'overdue').length || 0;
-    const monthDefaultRate = (monthOverdueCount / monthCount) * 100;
+    const totalFaturado = allInvoices.reduce((acc, inv) => acc + inv.value, 0);
+    const totalPago = allInvoices.filter(i => i.status === 'paid').reduce((acc, inv) => acc + inv.value, 0);
+    const totalPendente = allInvoices.filter(i => i.status === 'pending' || i.status === 'overdue').reduce((acc, inv) => acc + inv.value, 0);
+    const overdueCount = allInvoices.filter(i => i.status === 'overdue').length;
+    const defaultRate = allInvoices.length > 0 ? (overdueCount / allInvoices.length) * 100 : 0;
 
     return (
         <div className="space-y-6">
@@ -86,13 +94,7 @@ export function ReceivablesContent() {
                         </div>
 
                         {(searchTerm || statusFilter !== 'all') && (
-                            <Button
-                                variant="ghost"
-                                onClick={() => {
-                                    setSearchTerm("");
-                                    setStatusFilter("all");
-                                }}
-                            >
+                            <Button variant="ghost" onClick={() => { setSearchTerm(""); setStatusFilter("all"); }}>
                                 Limpar
                             </Button>
                         )}
@@ -110,34 +112,34 @@ export function ReceivablesContent() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <MetricCard
                     title="Total Faturado"
-                    value={formatCurrency(totalInvoicedInMonth)}
+                    value={formatCurrency(totalFaturado)}
                     change={0}
                     icon={<Receipt className="h-6 w-6" />}
-                    description="Competência (Vencimento)"
+                    description="Esperado no período"
                     variant="default"
                 />
                 <MetricCard
                     title="Total Recebido"
-                    value={formatCurrency(current.revenue)}
+                    value={formatCurrency(totalPago)}
                     change={0}
                     icon={<DollarSign className="h-6 w-6" />}
-                    description="Caixa (Pago este mês)"
+                    description="Confirmado no período"
                     variant="success"
                 />
                 <MetricCard
                     title="Em Aberto"
-                    value={formatCurrency(current.pending)}
+                    value={formatCurrency(totalPendente)}
                     change={0}
                     icon={<Clock className="h-6 w-6" />}
-                    description="A vencer este mês"
+                    description="Pendente + Atrasado"
                     variant="warning"
                 />
                 <MetricCard
                     title="Inadimplência"
-                    value={`${monthDefaultRate.toFixed(1)}%`}
+                    value={`${defaultRate.toFixed(1)}%`}
                     change={0}
                     icon={<AlertTriangle className="h-6 w-6" />}
-                    description="Taxa deste mês"
+                    description="Taxa do período"
                     variant="destructive"
                 />
             </div>
@@ -145,11 +147,26 @@ export function ReceivablesContent() {
             <div className="grid gap-6 lg:grid-cols-3">
                 <Card className="lg:col-span-1">
                     <CardHeader>
-                        <CardTitle className="text-lg">Taxa de Adimplência</CardTitle>
+                        <CardTitle className="text-lg">Resumo do Mês</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="flex h-[200px] items-center justify-center text-center text-sm text-muted-foreground p-4">
-                            Visualização de adimplência simplificada.
+                        <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm text-muted-foreground">Total de clientes</span>
+                                <span className="font-medium">{allInvoices.length}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm text-muted-foreground">Pagos</span>
+                                <span className="font-medium text-success">{allInvoices.filter(i => i.status === 'paid').length}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm text-muted-foreground">Pendentes</span>
+                                <span className="font-medium text-warning">{allInvoices.filter(i => i.status === 'pending').length}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm text-muted-foreground">Atrasados</span>
+                                <span className="font-medium text-destructive">{overdueCount}</span>
+                            </div>
                         </div>
                     </CardContent>
                 </Card>
@@ -185,7 +202,9 @@ export function ReceivablesContent() {
 
             <Card>
                 <CardHeader>
-                    <CardTitle className="text-lg">Faturas (Competência: {selectedMonth.toLocaleString('pt-BR', { month: 'long', year: 'numeric' })})</CardTitle>
+                    <CardTitle className="text-lg">
+                        Faturas — {periodLabel}
+                    </CardTitle>
                 </CardHeader>
                 <CardContent>
                     <InvoicesTable data={filteredInvoices} />

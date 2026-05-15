@@ -2,19 +2,16 @@ import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Download, Loader2, Calendar as CalendarIcon } from "lucide-react";
+import { FileText, Download, Loader2 } from "lucide-react";
 import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { useFinancialData } from "@/contexts/FinancialContext";
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
+import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { ptBR } from "date-fns/locale";
 import { format, isAfter, endOfMonth, startOfMonth, isSameMonth, parseISO } from "date-fns";
 import { calculateProjectedRevenue } from "@/utils/projections";
+import { isTaxCategory } from "@/lib/costCategories";
+import { getCostDisplayName } from "@/lib/costNames";
 
 interface DRELine {
     label: string;
@@ -26,20 +23,27 @@ interface DRELine {
 }
 
 export function DreContent() {
-    const { invoices, fixedCosts, variableCosts, selectedMonth, setSelectedMonth, isLoading: isLoadingData, clients } = useFinancialData();
+    const { invoices, fixedCosts, variableCosts, selectedMonth, setSelectedMonth, dateRange, setDateRange, settings, isLoading: isLoadingData, clients } = useFinancialData();
 
     // --- Calculations ---
 
-    // 1. Gross Revenue (Receita Bruta) - Paid Invoices in the selected month
+    const accountingMethod = settings?.accounting_method || 'cash';
+
+    // 1. Gross Revenue (Receita Bruta) - Based on Accounting Method
     const receitaRealizada = useMemo(() => {
         if (!invoices) return 0;
         return invoices
             .filter(inv => {
-                if (inv.status !== 'paid' || !inv.paid_date) return false;
-                return isSameMonth(parseISO(inv.paid_date), selectedMonth);
+                if (accountingMethod === 'cash') {
+                    if (inv.status !== 'paid' || !inv.paid_date) return false;
+                    return isSameMonth(parseISO(inv.paid_date), selectedMonth);
+                } else {
+                    // Competência - faturas vencendo no mês (exceto canceladas)
+                    return isSameMonth(parseISO(inv.due_date), selectedMonth) && inv.status !== 'canceled';
+                }
             })
             .reduce((sum, inv) => sum + (inv.value || 0), 0);
-    }, [invoices, selectedMonth]);
+    }, [invoices, selectedMonth, accountingMethod]);
 
     // 1.1 Projected Revenue (from Contracts)
     const receitaProjetada = useMemo(() => {
@@ -77,12 +81,19 @@ export function DreContent() {
     // 2. Variable Costs & Taxes (C3 fix: use isSameMonth instead of string comparison)
     const currentVariableCosts = useMemo(() => {
         if (!variableCosts) return [];
-        return variableCosts.filter(c => c.month && isSameMonth(parseISO(c.month), selectedMonth));
-    }, [variableCosts, selectedMonth]);
+        return variableCosts.filter(c => {
+            if (!c.month) return false;
+            const costDate = parseISO(c.month);
+            if (accountingMethod === 'cash') {
+                return isSameMonth(costDate, selectedMonth) && (c.status === 'paid' || c.status === null);
+            }
+            return isSameMonth(costDate, selectedMonth) && (c.status as string) !== 'canceled';
+        });
+    }, [variableCosts, selectedMonth, accountingMethod]);
 
     const impostos = useMemo(() => {
         return currentVariableCosts
-            .filter(c => ['Impostos', 'DARF', 'Simples Nacional', 'Taxas'].includes(c.category) || c.category.toUpperCase().includes('DARF') || c.category.toUpperCase().includes('SIMPLES'))
+            .filter(c => isTaxCategory(c.category))
             .reduce((acc, c) => acc + c.amount, 0);
     }, [currentVariableCosts]);
 
@@ -90,7 +101,7 @@ export function DreContent() {
 
     const totalVariable = useMemo(() => {
         return currentVariableCosts
-            .filter(c => !['Impostos', 'DARF', 'Simples Nacional', 'Taxas'].includes(c.category) && !c.category.toUpperCase().includes('DARF') && !c.category.toUpperCase().includes('SIMPLES'))
+            .filter(c => !isTaxCategory(c.category))
             .reduce((acc, c) => acc + c.amount, 0);
     }, [currentVariableCosts]);
 
@@ -100,19 +111,28 @@ export function DreContent() {
     const currentFixedCosts = useMemo(() => {
         if (!fixedCosts) return [];
         return fixedCosts.filter(c => {
-            if (c.month) return isSameMonth(parseISO(c.month), selectedMonth);
-            return false;
+            if (!c.month) return false;
+            const costDate = parseISO(c.month);
+            if (accountingMethod === 'cash') {
+                return isSameMonth(costDate, selectedMonth) && (c.status === 'paid' || c.status === null);
+            }
+            return isSameMonth(costDate, selectedMonth) && (c.status as string) !== 'canceled';
         });
-    }, [fixedCosts, selectedMonth]);
+    }, [fixedCosts, selectedMonth, accountingMethod]);
 
     const totalFixed = currentFixedCosts.reduce((acc, c) => acc + c.actual, 0);
 
     const ebitda = margemContribuicao - totalFixed;
-    const depAmort = 0; // Placeholder
+    
+    // P4 Fix: Real values from settings
+    const depAmort = settings?.depreciation_monthly || 0;
     const ebit = ebitda - depAmort;
-    const resFinanceiro = 0; // Placeholder
+    const resFinanceiro = settings?.financial_result_monthly || 0;
     const lucroAntesIR = ebit + resFinanceiro;
-    const irCsll = 0; // Placeholder
+    
+    const irRate = settings?.ir_csll_rate || 0;
+    const irCsll = lucroAntesIR > 0 ? lucroAntesIR * irRate : 0;
+    
     const lucroLiquido = lucroAntesIR - irCsll;
 
     // --- DRE Data Structure ---
@@ -126,9 +146,9 @@ export function DreContent() {
 
         { label: "(-) CUSTOS VARIÁVEIS", actual: -totalVariable, budgeted: 0, isHeader: true },
         ...(currentVariableCosts
-            .filter(c => !['Impostos', 'DARF', 'Simples Nacional', 'Taxas'].includes(c.category) && !c.category.toUpperCase().includes('DARF'))
+            .filter(c => !isTaxCategory(c.category))
             .map(vc => ({
-                label: vc.category,
+                label: getCostDisplayName(vc),
                 actual: -vc.amount,
                 budgeted: 0,
                 indent: 1
@@ -138,7 +158,7 @@ export function DreContent() {
 
         { label: "(-) CUSTOS FIXOS", actual: -totalFixed, budgeted: 0, isHeader: true },
         ...(currentFixedCosts.map(fc => ({
-            label: fc.category,
+            label: getCostDisplayName(fc),
             actual: -fc.actual,
             budgeted: -fc.budgeted || 0,
             indent: 1
@@ -179,28 +199,13 @@ export function DreContent() {
 
                 {/* Date Filter */}
                 <div className="flex items-center gap-2">
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <Button
-                                variant={"outline"}
-                                className={cn(
-                                    "w-[240px] justify-start text-left font-normal",
-                                    !selectedMonth && "text-muted-foreground"
-                                )}
-                            >
-                                <CalendarIcon className="mr-2 h-4 w-4" />
-                                {selectedMonth ? format(selectedMonth, "MMMM yyyy", { locale: ptBR }) : <span>Selecione uma data</span>}
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                                mode="single"
-                                selected={selectedMonth}
-                                onSelect={(d) => d && setSelectedMonth(d)}
-                                initialFocus
-                            />
-                        </PopoverContent>
-                    </Popover>
+                    <DatePickerWithRange
+                        date={dateRange}
+                        onDateChange={(range) => {
+                            setDateRange(range);
+                            if (range?.from) setSelectedMonth(range.from);
+                        }}
+                    />
                 </div>
 
                 <div className="flex gap-2">

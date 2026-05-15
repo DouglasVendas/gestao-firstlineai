@@ -43,40 +43,49 @@ export type Database = {
       }
       clients: {
         Row: {
+          billing_cycle: string | null
           churn_date: string | null
           churn_reason: string | null
+          contract_duration: number | null
           created_at: string
           email: string | null
           id: string
           mrr: number
           name: string
           plan_id: string | null
+          products: Json | null
           start_date: string | null
           status: string
           voluntary: boolean | null
         }
         Insert: {
+          billing_cycle?: string | null
           churn_date?: string | null
           churn_reason?: string | null
+          contract_duration?: number | null
           created_at?: string
           email?: string | null
           id?: string
           mrr?: number
           name: string
           plan_id?: string | null
+          products?: Json | null
           start_date?: string | null
           status?: string
           voluntary?: boolean | null
         }
         Update: {
+          billing_cycle?: string | null
           churn_date?: string | null
           churn_reason?: string | null
+          contract_duration?: number | null
           created_at?: string
           email?: string | null
           id?: string
           mrr?: number
           name?: string
           plan_id?: string | null
+          products?: Json | null
           start_date?: string | null
           status?: string
           voluntary?: boolean | null
@@ -136,6 +145,57 @@ export type Database = {
         }
         Relationships: []
       }
+      financial_settings: {
+        Row: {
+          id: string
+          organization_id: string | null
+          initial_balance: number
+          balance_reference_date: string
+          tax_rate: number
+          accounting_method: string
+          budget_revenue: number
+          depreciation_monthly: number
+          financial_result_monthly: number
+          ir_csll_rate: number
+          private_discount: number
+          cac_categories: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id?: string | null
+          initial_balance?: number
+          balance_reference_date?: string
+          tax_rate?: number
+          accounting_method?: string
+          budget_revenue?: number
+          depreciation_monthly?: number
+          financial_result_monthly?: number
+          ir_csll_rate?: number
+          private_discount?: number
+          cac_categories?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string | null
+          initial_balance?: number
+          balance_reference_date?: string
+          tax_rate?: number
+          accounting_method?: string
+          budget_revenue?: number
+          depreciation_monthly?: number
+          financial_result_monthly?: number
+          ir_csll_rate?: number
+          private_discount?: number
+          cac_categories?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       fixed_costs: {
         Row: {
           actual: number
@@ -145,6 +205,7 @@ export type Database = {
           description: string | null
           id: string
           month: string | null
+          status: string | null
         }
         Insert: {
           actual?: number
@@ -154,6 +215,7 @@ export type Database = {
           description?: string | null
           id?: string
           month?: string | null
+          status?: string | null
         }
         Update: {
           actual?: number
@@ -163,6 +225,7 @@ export type Database = {
           description?: string | null
           id?: string
           month?: string | null
+          status?: string | null
         }
         Relationships: []
       }
@@ -197,6 +260,47 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "invoices_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mrr_changes: {
+        Row: {
+          id: string
+          client_id: string
+          change_date: string
+          previous_mrr: number
+          new_mrr: number
+          change_type: string
+          reason: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          change_date?: string
+          previous_mrr: number
+          new_mrr: number
+          change_type: string
+          reason?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          client_id?: string
+          change_date?: string
+          previous_mrr?: number
+          new_mrr?: number
+          change_type?: string
+          reason?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mrr_changes_client_id_fkey"
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
@@ -319,7 +423,9 @@ export type Database = {
           created_at: string
           description: string | null
           id: string
+          is_auto_generated: boolean | null
           month: string
+          status: string | null
         }
         Insert: {
           amount?: number
@@ -327,7 +433,9 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          is_auto_generated?: boolean | null
           month: string
+          status?: string | null
         }
         Update: {
           amount?: number
@@ -335,7 +443,9 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          is_auto_generated?: boolean | null
           month?: string
+          status?: string | null
         }
         Relationships: []
       }

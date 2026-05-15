@@ -1,5 +1,5 @@
 import * as React from "react"
-import { format, subDays, startOfMonth, endOfMonth, subMonths, startOfYear, endOfYear, startOfDay, endOfDay } from "date-fns"
+import { format, subDays, subMonths, startOfYear, startOfDay, endOfDay } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { Calendar as CalendarIcon } from "lucide-react"
 import { DateRange } from "react-day-picker"
@@ -19,55 +19,44 @@ interface DatePickerWithRangeProps {
     onDateChange?: (date: DateRange | undefined) => void
 }
 
-export function DatePickerWithRange({
-    className,
-    date,
-    onDateChange
-}: DatePickerWithRangeProps) {
+export function DatePickerWithRange({ className, date, onDateChange }: DatePickerWithRangeProps) {
     const [isOpen, setIsOpen] = React.useState(false)
+    const [pending, setPending] = React.useState<DateRange | undefined>(date)
 
     const today = new Date()
 
+    React.useEffect(() => {
+        setPending(date)
+    }, [date])
+
     const presets = [
         {
-            label: "Hoje",
-            getValue: () => ({ from: startOfDay(today), to: endOfDay(today) })
+            label: "Últimos 60 dias",
+            getValue: () => ({ from: startOfDay(subDays(today, 59)), to: endOfDay(today) }),
         },
         {
-            label: "Ontem",
-            getValue: () => {
-                const yesterday = subDays(today, 1)
-                return { from: startOfDay(yesterday), to: endOfDay(yesterday) }
-            }
+            label: "Últimos 90 dias",
+            getValue: () => ({ from: startOfDay(subDays(today, 89)), to: endOfDay(today) }),
         },
         {
-            label: "Última semana",
-            getValue: () => ({ from: startOfDay(subDays(today, 7)), to: endOfDay(today) })
-        },
-        {
-            label: "Este mês",
-            getValue: () => ({ from: startOfMonth(today), to: endOfMonth(today) })
-        },
-        {
-            label: "Último mês",
-            getValue: () => ({
-                from: startOfMonth(subMonths(today, 1)),
-                to: endOfMonth(subMonths(today, 1))
-            })
+            label: "Último semestre",
+            getValue: () => ({ from: startOfDay(subMonths(today, 6)), to: endOfDay(today) }),
         },
         {
             label: "Este ano",
-            getValue: () => ({ from: startOfYear(today), to: endOfYear(today) })
+            getValue: () => ({ from: startOfYear(today), to: endOfDay(today) }),
         },
-        {
-            label: "Últimos 30 dias",
-            getValue: () => ({ from: startOfDay(subDays(today, 30)), to: endOfDay(today) })
-        },
-        {
-            label: "Todo período",
-            getValue: () => undefined
-        }
     ]
+
+    const handleApply = () => {
+        if (onDateChange) onDateChange(pending)
+        setIsOpen(false)
+    }
+
+    const handleCancel = () => {
+        setPending(date)
+        setIsOpen(false)
+    }
 
     return (
         <div className={cn("grid gap-2", className)}>
@@ -75,29 +64,36 @@ export function DatePickerWithRange({
                 <PopoverTrigger asChild>
                     <Button
                         id="date"
-                        variant={"outline"}
+                        variant="outline"
                         className={cn(
-                            "w-[260px] justify-start text-left font-normal",
+                            "w-[300px] justify-start text-left font-normal",
                             !date && "text-muted-foreground"
                         )}
                     >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
                         {date?.from ? (
-                            date.to ? (
-                                <>
-                                    {format(date.from, "dd/MM/yyyy")} -{" "}
-                                    {format(date.to, "dd/MM/yyyy")}
-                                </>
-                            ) : (
-                                format(date.from, "dd/MM/yyyy")
-                            )
+                            <span className="flex items-center gap-1.5 text-sm">
+                                <span className="text-muted-foreground text-xs font-medium">DE</span>
+                                {format(date.from, "dd/MM/yyyy")}
+                                {date.to && (
+                                    <>
+                                        <span className="text-muted-foreground text-xs font-medium">ATÉ</span>
+                                        {format(date.to, "dd/MM/yyyy")}
+                                    </>
+                                )}
+                            </span>
                         ) : (
                             <span>Selecione um período</span>
                         )}
                     </Button>
                 </PopoverTrigger>
+
                 <PopoverContent className="w-auto p-0 flex flex-col md:flex-row" align="start">
-                    <div className="flex flex-col border-r border-border p-2 gap-1 md:w-40 bg-muted/20">
+                    {/* Presets */}
+                    <div className="flex flex-col border-r border-border p-3 gap-1 md:w-44 bg-muted/20">
+                        <p className="text-xs font-medium text-muted-foreground px-2 pb-2 uppercase tracking-wide">
+                            Atalhos
+                        </p>
                         {presets.map((preset) => (
                             <Button
                                 key={preset.label}
@@ -105,9 +101,9 @@ export function DatePickerWithRange({
                                 size="sm"
                                 className="justify-start text-left font-normal h-8"
                                 onClick={() => {
-                                    if (onDateChange) {
-                                        onDateChange(preset.getValue())
-                                    }
+                                    const value = preset.getValue()
+                                    setPending(value)
+                                    if (onDateChange) onDateChange(value)
                                     setIsOpen(false)
                                 }}
                             >
@@ -115,18 +111,47 @@ export function DatePickerWithRange({
                             </Button>
                         ))}
                     </div>
-                    <div className="p-2">
+
+                    {/* Calendar */}
+                    <div className="p-3">
+                        {/* DE / ATÉ indicators */}
+                        <div className="flex items-center gap-3 mb-3 px-1 pb-3 border-b border-border">
+                            <div className="flex flex-col min-w-[100px]">
+                                <span className="text-xs font-semibold text-muted-foreground tracking-wide">DE:</span>
+                                <span className="text-sm font-medium">
+                                    {pending?.from
+                                        ? format(pending.from, "dd/MM/yyyy", { locale: ptBR })
+                                        : <span className="text-muted-foreground">—</span>}
+                                </span>
+                            </div>
+                            <div className="h-px w-6 bg-border mt-3" />
+                            <div className="flex flex-col min-w-[100px]">
+                                <span className="text-xs font-semibold text-muted-foreground tracking-wide">ATÉ:</span>
+                                <span className="text-sm font-medium">
+                                    {pending?.to
+                                        ? format(pending.to, "dd/MM/yyyy", { locale: ptBR })
+                                        : <span className="text-muted-foreground">—</span>}
+                                </span>
+                            </div>
+                        </div>
+
                         <Calendar
                             initialFocus
                             mode="range"
-                            defaultMonth={date?.from}
-                            selected={date}
-                            onSelect={onDateChange}
+                            defaultMonth={pending?.from}
+                            selected={pending}
+                            onSelect={setPending}
                             numberOfMonths={2}
                             locale={ptBR}
                         />
-                        <div className="flex items-center justify-end p-2 border-t mt-2">
-                            <Button onClick={() => setIsOpen(false)} size="sm">Aplicar</Button>
+
+                        <div className="flex items-center justify-end gap-2 pt-3 border-t mt-2">
+                            <Button variant="outline" size="sm" onClick={handleCancel}>
+                                Cancelar
+                            </Button>
+                            <Button size="sm" onClick={handleApply} disabled={!pending?.from}>
+                                Aplicar
+                            </Button>
                         </div>
                     </div>
                 </PopoverContent>

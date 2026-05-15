@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -14,6 +14,7 @@ import {
 import {
     Form,
     FormControl,
+    FormDescription,
     FormField,
     FormItem,
     FormLabel,
@@ -31,180 +32,215 @@ import {
 import { useCreateFixedCost } from "@/hooks/useFixedCosts";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Plus } from "lucide-react";
+import { CostAttachmentInput } from "@/components/costs/CostAttachmentInput";
+import { COST_CATEGORY_OPTIONS } from "@/lib/costCategories";
 
 const formSchema = z.object({
-    category: z.enum(["Pessoal", "Infraestrutura", "Operacional", "Outros"]),
+    name: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
+    category: z.enum(COST_CATEGORY_OPTIONS),
     description: z.string().optional(),
-    budgeted: z.coerce.number().min(0),
-    actual: z.coerce.number().min(0),
-    due_day: z.coerce.number().min(1).max(31).optional(),
-    month: z.string().min(1, "Mês de competência obrigatório"), // C3 fix: add month field
+    amount: z.coerce.number().min(0.01, "Valor mensal deve ser positivo"),
+    due_day: z.coerce.number().min(1).max(31),
+    start_month: z.string().min(1, "Mês de início obrigatório"),
+    duration_type: z.enum(["indefinite", "months", "until"]),
+    duration_months: z.coerce.number().min(1).optional(),
+    end_month: z.string().optional(),
+}).superRefine((values, ctx) => {
+    if (values.duration_type === "months" && !values.duration_months) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["duration_months"], message: "Informe a quantidade de meses" });
+    }
+    if (values.duration_type === "until" && !values.end_month) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["end_month"], message: "Informe o mês final" });
+    }
 });
 
-export function CreateFixedCostModal() {
-    const [open, setOpen] = useState(false);
+type FormValues = z.infer<typeof formSchema>;
+
+interface CreateFixedCostModalProps {
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    trigger?: ReactNode;
+    hideTrigger?: boolean;
+}
+
+function currentMonth() {
+    return new Date().toISOString().slice(0, 7);
+}
+
+export function CreateFixedCostModal({ open, onOpenChange, trigger, hideTrigger = false }: CreateFixedCostModalProps = {}) {
+    const [internalOpen, setInternalOpen] = useState(false);
+    const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
     const createCost = useCreateFixedCost();
     const { toast } = useToast();
+    const dialogOpen = open ?? internalOpen;
+    const setDialogOpen = onOpenChange ?? setInternalOpen;
 
-    const form = useForm<z.infer<typeof formSchema>>({
+    const form = useForm<FormValues>({
         resolver: zodResolver(formSchema),
         defaultValues: {
-            category: "Operacional",
-            budgeted: 0,
-            actual: 0,
+            name: "",
+            category: "Administrativo",
+            amount: 0,
+            due_day: 10,
             description: "",
-            month: new Date().toISOString().split("T")[0], // Default to today (YYYY-MM-DD format)
+            start_month: currentMonth(),
+            duration_type: "indefinite",
+            duration_months: undefined,
+            end_month: "",
         },
     });
 
-    const onSubmit = (values: z.infer<typeof formSchema>) => {
-        // Cast to any to avoid strict Supabase type mismatches with Schema
-        const payload = {
-            ...values,
-            due_day: values.due_day || null,
-        } as any;
+    const durationType = form.watch("duration_type");
 
+    const onSubmit = (values: FormValues) => {
         createCost.mutate(
-            payload,
+            {
+                name: values.name,
+                category: values.category,
+                description: values.description || null,
+                amount: values.amount,
+                due_day: values.due_day,
+                start_month: values.start_month,
+                duration_months: values.duration_type === "months" ? values.duration_months : null,
+                end_month: values.duration_type === "until" ? values.end_month : null,
+                attachmentFiles,
+            },
             {
                 onSuccess: () => {
                     toast({
-                        title: "Custo fixo adicionado",
-                        description: "O custo foi registrado com sucesso.",
+                        title: "Custo fixo recorrente adicionado",
+                        description: "O custo passará a aparecer nos meses previstos.",
                     });
-                    setOpen(false);
+                    setDialogOpen(false);
+                    setAttachmentFiles([]);
                     form.reset();
                 },
                 onError: (error) => {
-                    toast({
-                        variant: "destructive",
-                        title: "Erro ao criar custo",
-                        description: error.message,
-                    });
+                    toast({ variant: "destructive", title: "Erro ao criar custo", description: error.message });
                 },
             }
         );
     };
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-                <Button>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Novo Custo Fixo
-                </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            {!hideTrigger && (
+                <DialogTrigger asChild>
+                    {trigger || (
+                        <Button>
+                            <Plus className="mr-2 h-4 w-4" />
+                            Novo Custo Fixo
+                        </Button>
+                    )}
+                </DialogTrigger>
+            )}
+            <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>Novo Custo Fixo</DialogTitle>
                     <DialogDescription>
-                        Adicione um custo recorrente ou fixo.
+                        Cadastre uma saída recorrente com vencimento mensal.
                     </DialogDescription>
                 </DialogHeader>
 
                 <Form {...form}>
                     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                        <FormField
-                            control={form.control}
-                            name="category"
-                            render={({ field }) => (
+                        <FormField control={form.control} name="name" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Nome</FormLabel>
+                                <FormControl><Input placeholder="Ex: Pró-labore Douglas, Supabase, Contabilidade" {...field} /></FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )} />
+
+                        <FormField control={form.control} name="category" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Categoria</FormLabel>
+                                <Select onValueChange={field.onChange} value={field.value}>
+                                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                                    <SelectContent>
+                                        {COST_CATEGORY_OPTIONS.map((category) => <SelectItem key={category} value={category}>{category}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                                <FormMessage />
+                            </FormItem>
+                        )} />
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <FormField control={form.control} name="amount" render={({ field }) => (
                                 <FormItem>
-                                    <FormLabel>Categoria</FormLabel>
-                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                        <FormControl>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Selecione" />
-                                            </SelectTrigger>
-                                        </FormControl>
+                                    <FormLabel>Valor mensal (R$)</FormLabel>
+                                    <FormControl><Input type="number" step="0.01" {...field} /></FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )} />
+                            <FormField control={form.control} name="due_day" render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Dia de vencimento</FormLabel>
+                                    <FormControl><Input type="number" min="1" max="31" {...field} /></FormControl>
+                                    <FormDescription>Usado para alertar atraso ou pagamento em dia.</FormDescription>
+                                    <FormMessage />
+                                </FormItem>
+                            )} />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <FormField control={form.control} name="start_month" render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Início</FormLabel>
+                                    <FormControl><Input type="month" {...field} /></FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )} />
+                            <FormField control={form.control} name="duration_type" render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Duração</FormLabel>
+                                    <Select onValueChange={field.onChange} value={field.value}>
+                                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                                         <SelectContent>
-                                            <SelectItem value="Pessoal">Pessoal</SelectItem>
-                                            <SelectItem value="Infraestrutura">Infraestrutura</SelectItem>
-                                            <SelectItem value="Operacional">Operacional</SelectItem>
-                                            <SelectItem value="Outros">Outros</SelectItem>
+                                            <SelectItem value="indefinite">Indeterminado</SelectItem>
+                                            <SelectItem value="months">Quantidade de meses</SelectItem>
+                                            <SelectItem value="until">Até mês específico</SelectItem>
                                         </SelectContent>
                                     </Select>
                                     <FormMessage />
                                 </FormItem>
-                            )}
-                        />
-
-                        <FormField
-                            control={form.control}
-                            name="description"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Descrição</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="Ex: Aluguel servidores" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <FormField
-                                control={form.control}
-                                name="budgeted"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Orçado (R$)</FormLabel>
-                                        <FormControl>
-                                            <Input type="number" step="0.01" {...field} />
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name="actual"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Realizado (R$)</FormLabel>
-                                        <FormControl>
-                                            <Input type="number" step="0.01" {...field} />
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
+                            )} />
                         </div>
-                        <FormField
-                            control={form.control}
-                            name="month"
-                            render={({ field }) => (
+
+                        {durationType === "months" && (
+                            <FormField control={form.control} name="duration_months" render={({ field }) => (
                                 <FormItem>
-                                    <FormLabel>Mês de Competência</FormLabel>
-                                    <FormControl>
-                                        <Input type="date" {...field} />
-                                    </FormControl>
+                                    <FormLabel>Quantidade de meses</FormLabel>
+                                    <FormControl><Input type="number" min="1" {...field} /></FormControl>
                                     <FormMessage />
                                 </FormItem>
-                            )}
-                        />
-                        <FormField
-                            control={form.control}
-                            name="due_day"
-                            render={({ field }) => (
+                            )} />
+                        )}
+
+                        {durationType === "until" && (
+                            <FormField control={form.control} name="end_month" render={({ field }) => (
                                 <FormItem>
-                                    <FormLabel>Dia de Vencimento</FormLabel>
-                                    <FormControl>
-                                        <Input type="number" min="1" max="31" {...field} />
-                                    </FormControl>
+                                    <FormLabel>Mês final</FormLabel>
+                                    <FormControl><Input type="month" {...field} /></FormControl>
                                     <FormMessage />
                                 </FormItem>
-                            )}
-                        />
+                            )} />
+                        )}
+
+                        <FormField control={form.control} name="description" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Descrição</FormLabel>
+                                <FormControl><Input placeholder="Detalhe opcional" {...field} /></FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )} />
+
+                        <CostAttachmentInput files={attachmentFiles} onFilesChange={setAttachmentFiles} disabled={createCost.isPending} />
 
                         <DialogFooter>
-                            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-                                Cancelar
-                            </Button>
+                            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
                             <Button type="submit" disabled={createCost.isPending}>
-                                {createCost.isPending && (
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                )}
+                                {createCost.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                 Salvar
                             </Button>
                         </DialogFooter>

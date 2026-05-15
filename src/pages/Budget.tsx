@@ -46,7 +46,7 @@ const okrs = [
 
 export default function Budget() {
   const { setPageTitle } = usePageTitle();
-  const { fixedCosts, isLoading: isLoadingCosts } = useFinancialData();
+  const { fixedCosts, settings, isLoading: isLoadingCosts } = useFinancialData();
   const { current, isLoading: isLoadingMetrics } = useFinancialSnapshot();
 
   React.useEffect(() => {
@@ -62,7 +62,7 @@ export default function Budget() {
   }
 
   // Calculate generic revenue stats from current snapshot
-  const revenueBudgeted = 350000; // This would typically come from a budget goals table
+  const revenueBudgeted = settings?.budget_revenue || 0;
   const revenueActual = current.revenue || 0;
 
   // Aggregate costs - Filter by selected month? 
@@ -112,6 +112,17 @@ export default function Budget() {
 
   return (
     <>
+      {/* P6: Visual warning for missing budget */}
+      {revenueBudgeted === 0 && (
+        <div className="mb-6 rounded-lg border border-warning/50 bg-warning/10 p-4 text-warning-foreground flex items-center gap-3">
+          <AlertCircle className="h-5 w-5" />
+          <div>
+            <p className="font-semibold">Meta de Receita não configurada</p>
+            <p className="text-sm">Vá em Configurações Financeiras para definir sua meta de faturamento mensal e anual.</p>
+          </div>
+        </div>
+      )}
+
       {/* Actions Bar */}
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-2">
