@@ -70,6 +70,18 @@ describe("unified cost import", () => {
     expect(rows[2].type).toBe("variable");
   });
 
+  it("parses decimal values with Brazilian or international separators", () => {
+    const rows = parseUnifiedCostRows([
+      { tipo: "variavel", nome: "Decimal BR", categoria: "Pessoas", valor: "2.465,90", mes: "2026-05-01" },
+      { tipo: "variavel", nome: "Decimal dot", categoria: "Pessoas", valor: "2465.90", mes: "2026-05-01" },
+      { tipo: "variavel", nome: "Thousands only", categoria: "Pessoas", valor: "2.465", mes: "2026-05-01" },
+    ]);
+
+    expect(rows[0].amount).toBe(2465.9);
+    expect(rows[1].amount).toBe(2465.9);
+    expect(rows[2].amount).toBe(2465);
+  });
+
   it("requires payment date for paid rows and account only when cash impact is enabled", () => {
     const rows = parseUnifiedCostRows([
       { tipo: "variavel", nome: "Pago sem data", categoria: "Pessoas", valor: "100", mes: "2026-05-01", status: "pago" },

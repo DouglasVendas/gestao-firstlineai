@@ -77,12 +77,22 @@ function getCell(row: Record<string, unknown>, ...keys: string[]) {
 }
 
 function parseAmount(value: string) {
-  const cleaned = value
-    .replace(/R\$/gi, "")
-    .replace(/\s/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".");
-  const parsed = Number.parseFloat(cleaned);
+  const raw = value.replace(/R\$/gi, "").replace(/\s/g, "");
+  const hasComma = raw.includes(",");
+  const hasDot = raw.includes(".");
+
+  let normalized = raw;
+  if (hasComma) {
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else if (hasDot) {
+    const parts = raw.split(".");
+    const lastPart = parts[parts.length - 1];
+    normalized = parts.length === 2 && lastPart.length <= 2
+      ? raw
+      : raw.replace(/\./g, "");
+  }
+
+  const parsed = Number.parseFloat(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 

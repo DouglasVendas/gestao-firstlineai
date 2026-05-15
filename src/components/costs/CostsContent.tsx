@@ -27,7 +27,7 @@ import {
     XAxis,
     YAxis,
 } from "recharts";
-import { differenceInCalendarDays, format, isSameMonth, parseISO, startOfDay } from "date-fns";
+import { differenceInCalendarDays, format, isWithinInterval, parseISO, startOfDay, endOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -277,7 +277,7 @@ function CostDetailsDialog({
 }
 
 export function CostsContent() {
-    const { fixedCosts, variableCosts, selectedMonth, isLoading, clients, invoices, settings } = useFinancialData();
+    const { fixedCosts, variableCosts, selectedMonth, dateRange, isLoading, clients, invoices, settings } = useFinancialData();
     const { updateSettings, isUpdating } = useFinancialSettings();
     const { toast } = useToast();
     const deleteFixedCost = useDeleteFixedCost();
@@ -297,9 +297,21 @@ export function CostsContent() {
         }
     }, [settings?.tax_rate]);
 
+    const isInActivePeriod = (value?: string | null) => {
+        if (!value) return false;
+        const date = parseISO(value);
+        if (dateRange?.from) {
+            return isWithinInterval(date, {
+                start: startOfDay(dateRange.from),
+                end: endOfDay(dateRange.to || dateRange.from),
+            });
+        }
+        return format(date, "yyyy-MM") === format(selectedMonth, "yyyy-MM");
+    };
+
     const items = useMemo<UnifiedCostItem[]>(() => {
         const fixedItems = (fixedCosts || [])
-            .filter((cost) => cost.month && isSameMonth(parseISO(cost.month), selectedMonth))
+            .filter((cost) => isInActivePeriod(cost.month))
             .map((cost): UnifiedCostItem => ({
                 type: "fixed",
                 id: cost.id,
@@ -316,7 +328,7 @@ export function CostsContent() {
             }));
 
         const variableItems = (variableCosts || [])
-            .filter((cost) => cost.month && isSameMonth(parseISO(cost.month), selectedMonth))
+            .filter((cost) => isInActivePeriod(cost.month))
             .map((cost): UnifiedCostItem => ({
                 type: "variable",
                 id: cost.id,
@@ -337,7 +349,7 @@ export function CostsContent() {
             const dateB = b.dueDate || b.date;
             return dateA.localeCompare(dateB) || a.name.localeCompare(b.name);
         });
-    }, [fixedCosts, selectedMonth, variableCosts]);
+    }, [dateRange, fixedCosts, selectedMonth, variableCosts]);
 
     const visibleItems = useMemo(() => {
         const query = search.trim().toLowerCase();
@@ -397,13 +409,13 @@ export function CostsContent() {
             .reduce((acc, client) => acc + (client.mrr || 0), 0);
 
         const taxCost = (variableCosts || [])
-            .filter((cost) => cost.month && isSameMonth(parseISO(cost.month), selectedMonth))
+            .filter((cost) => isInActivePeriod(cost.month))
             .find(isAutomaticTaxCost);
 
         const receipts = (invoices || [])
             .filter((invoice) => {
                 const paid = invoice.status === "paid" || (invoice.status as string) === "pago";
-                return paid && invoice.paid_date && isSameMonth(parseISO(invoice.paid_date), selectedMonth);
+                return paid && invoice.paid_date && isInActivePeriod(invoice.paid_date);
             })
             .reduce((acc, invoice) => acc + Number(invoice.value || 0), 0);
 
@@ -420,7 +432,7 @@ export function CostsContent() {
             automaticTaxCost: taxCost,
             confirmedReceipts: receipts,
         };
-    }, [clients, invoices, items, selectedMonth, variableCosts]);
+    }, [clients, invoices, items, dateRange, selectedMonth, variableCosts]);
 
     const contributionMargin = totalMRR > 0 ? ((totalMRR - variableTotal) / totalMRR) * 100 : 0;
     const averageVariableCostPerClient = activeClientsCount > 0 ? variableTotal / activeClientsCount : 0;
