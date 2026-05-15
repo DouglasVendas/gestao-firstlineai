@@ -13,6 +13,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { usePlans } from "@/hooks/usePlans";
 import { useAuth } from "@/contexts/auth/AuthContext";
+import {
+  ExistingClientImportMatch,
+  findExistingClientImportMatch,
+  parseClientImportRows,
+  ParsedClientImportRow,
+} from "@/lib/clientImport";
 
 const TEMPLATE_HEADERS = [
   "nome", "email", "plano", "ciclo_cobranca", "mrr", "status",
@@ -24,35 +30,6 @@ const TEMPLATE_EXAMPLE = [
   "active", "2024-01-15", "CRM,Auditoria", "", "",
 ];
 
-const CICLO_MAP: Record<string, string> = {
-  mensal: "monthly", monthly: "monthly",
-  bimestral: "bimonthly", bimonthly: "bimonthly",
-  trimestral: "quarterly", quarterly: "quarterly",
-  semestral: "semiannual", semiannual: "semiannual",
-  anual: "yearly", yearly: "yearly",
-};
-
-const STATUS_MAP: Record<string, string> = {
-  ativo: "active", active: "active",
-  trial: "trial",
-  cancelado: "churned", churned: "churned",
-  inativo: "inactive", inactive: "inactive",
-};
-
-interface ParsedRow {
-  name: string;
-  email: string | null;
-  plan_name: string;
-  billing_cycle: string;
-  mrr: number;
-  status: string;
-  start_date: string | null;
-  products: string[];
-  churn_reason: string | null;
-  churn_date: string | null;
-  _error?: string;
-}
-
 function downloadTemplate() {
   const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, TEMPLATE_EXAMPLE]);
   ws["!cols"] = TEMPLATE_HEADERS.map(() => ({ wch: 20 }));
@@ -61,48 +38,9 @@ function downloadTemplate() {
   XLSX.writeFile(wb, "template_clientes.xlsx");
 }
 
-function parseRows(raw: any[]): ParsedRow[] {
-  return raw.map((row) => {
-    const get = (key: string) => {
-      const found = Object.keys(row).find(
-        (k) => k.toLowerCase().trim() === key.toLowerCase()
-      );
-      return found ? String(row[found] ?? "").trim() : "";
-    };
-
-    const name = get("nome");
-    if (!name) return { ...({} as ParsedRow), _error: "Nome obrigatório" };
-
-    const billing_cycle = CICLO_MAP[get("ciclo_cobranca").toLowerCase()] || "monthly";
-    const status = STATUS_MAP[get("status").toLowerCase()] || "active";
-    const mrr = parseFloat(get("mrr").replace(",", ".")) || 0;
-    const productsRaw = get("produtos");
-    const products = productsRaw
-      ? productsRaw.split(",").map((p) => p.trim()).filter(Boolean)
-      : [];
-
-    const start_date = get("data_inicio") || null;
-    const churn_date = get("data_churn") || null;
-    const churn_reason = get("motivo_churn") || null;
-
-    return {
-      name,
-      email: get("email") || null,
-      plan_name: get("plano"),
-      billing_cycle,
-      mrr,
-      status,
-      start_date,
-      products,
-      churn_reason,
-      churn_date,
-    };
-  }).filter((r) => r.name);
-}
-
 export function ClientImportModal() {
   const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<ParsedRow[]>([]);
+  const [rows, setRows] = useState<ParsedClientImportRow[]>([]);
   const [importing, setImporting] = useState(false);
   const [done, setDone] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -139,7 +77,7 @@ export function ClientImportModal() {
       Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
-        complete: (result) => setRows(parseRows(result.data)),
+        complete: (result) => setRows(parseClientImportRows(result.data)),
       });
     } else {
       const reader = new FileReader();
@@ -147,7 +85,7 @@ export function ClientImportModal() {
         const wb = XLSX.read(e.target?.result, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const data = XLSX.utils.sheet_to_json(ws, { defval: "" });
-        setRows(parseRows(data));
+        setRows(parseClientImportRows(data));
       };
       reader.readAsArrayBuffer(file);
     }
@@ -166,9 +104,31 @@ export function ClientImportModal() {
 
     setImporting(true);
     const validRows = rows.filter((r) => !r._error);
-    let success = 0;
+    let created = 0;
+    let updated = 0;
     let errors = 0;
     const errorMessages: string[] = [];
+
+    const { data: existingClients, error: existingError } = await supabase
+      .from("clients")
+      .select("id,name,email")
+      .eq("organization_id", orgId);
+
+    if (existingError) {
+      setImporting(false);
+      toast({
+        title: "Erro ao verificar clientes existentes",
+        description: existingError.message,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const knownClients: ExistingClientImportMatch[] = (existingClients || []).map((client) => ({
+      id: client.id,
+      name: client.name,
+      email: client.email,
+    }));
 
     for (const row of validRows) {
       let plan_id: string | null = null;
@@ -179,7 +139,7 @@ export function ClientImportModal() {
         plan_id = plan?.id ?? null;
       }
 
-      const { error } = await supabase.from("clients").insert({
+      const payload = {
         name: row.name,
         email: row.email,
         organization_id: orgId,
@@ -191,7 +151,22 @@ export function ClientImportModal() {
         products: row.products.length ? row.products : null,
         churn_reason: row.churn_reason,
         churn_date: row.churn_date,
-      });
+      };
+
+      const existingClient = findExistingClientImportMatch(row, knownClients);
+
+      const { data: savedClient, error } = existingClient
+        ? await supabase
+          .from("clients")
+          .update(payload)
+          .eq("id", existingClient.id)
+          .select("id,name,email")
+          .single()
+        : await supabase
+          .from("clients")
+          .insert(payload)
+          .select("id,name,email")
+          .single();
 
       if (error) {
         errors++;
@@ -199,7 +174,18 @@ export function ClientImportModal() {
           errorMessages.push(`${row.name}: ${error.message}`);
         }
       }
-      else success++;
+      else if (savedClient) {
+        if (existingClient) {
+          updated++;
+        } else {
+          created++;
+          knownClients.push({
+            id: savedClient.id,
+            name: savedClient.name,
+            email: savedClient.email,
+          });
+        }
+      }
     }
 
     setImporting(false);
@@ -208,8 +194,8 @@ export function ClientImportModal() {
     toast({
       title: `Importação concluída`,
       description: errors
-        ? `${success} clientes importados, ${errors} com erro. ${errorMessages.join(" | ")}`
-        : `${success} clientes importados.`,
+        ? `${created} criados, ${updated} atualizados, ${errors} com erro. ${errorMessages.join(" | ")}`
+        : `${created} clientes criados, ${updated} atualizados.`,
       variant: errors ? "destructive" : "default",
     });
     if (!errors) setTimeout(() => setOpen(false), 1500);
