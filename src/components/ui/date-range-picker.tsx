@@ -1,5 +1,5 @@
 import * as React from "react"
-import { format, subDays, subMonths, startOfYear, startOfDay, endOfDay } from "date-fns"
+import { endOfMonth, endOfQuarter, endOfYear, format, startOfMonth, startOfQuarter, startOfYear, subMonths, subQuarters, subYears } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { Calendar as CalendarIcon } from "lucide-react"
 import { DateRange } from "react-day-picker"
@@ -29,22 +29,49 @@ export function DatePickerWithRange({ className, date, onDateChange }: DatePicke
         setPending(date)
     }, [date])
 
-    const presets = [
+    const previousMonth = subMonths(today, 1)
+    const previousQuarter = subQuarters(today, 1)
+    const previousYear = subYears(today, 1)
+
+    const presetGroups = [
         {
-            label: "Últimos 60 dias",
-            getValue: () => ({ from: startOfDay(subDays(today, 59)), to: endOfDay(today) }),
+            title: "Mês",
+            items: [
+                {
+                    label: "Este mês",
+                    getValue: () => ({ from: startOfMonth(today), to: endOfMonth(today) }),
+                },
+                {
+                    label: "Mês anterior",
+                    getValue: () => ({ from: startOfMonth(previousMonth), to: endOfMonth(previousMonth) }),
+                },
+            ],
         },
         {
-            label: "Últimos 90 dias",
-            getValue: () => ({ from: startOfDay(subDays(today, 89)), to: endOfDay(today) }),
+            title: "Trimestre",
+            items: [
+                {
+                    label: "Este trimestre",
+                    getValue: () => ({ from: startOfQuarter(today), to: endOfQuarter(today) }),
+                },
+                {
+                    label: "Trimestre anterior",
+                    getValue: () => ({ from: startOfQuarter(previousQuarter), to: endOfQuarter(previousQuarter) }),
+                },
+            ],
         },
         {
-            label: "Último semestre",
-            getValue: () => ({ from: startOfDay(subMonths(today, 6)), to: endOfDay(today) }),
-        },
-        {
-            label: "Este ano",
-            getValue: () => ({ from: startOfYear(today), to: endOfDay(today) }),
+            title: "Ano",
+            items: [
+                {
+                    label: "Este ano",
+                    getValue: () => ({ from: startOfYear(today), to: endOfYear(today) }),
+                },
+                {
+                    label: "Ano anterior",
+                    getValue: () => ({ from: startOfYear(previousYear), to: endOfYear(previousYear) }),
+                },
+            ],
         },
     ]
 
@@ -90,25 +117,32 @@ export function DatePickerWithRange({ className, date, onDateChange }: DatePicke
 
                 <PopoverContent className="w-auto p-0 flex flex-col md:flex-row" align="start">
                     {/* Presets */}
-                    <div className="flex flex-col border-r border-border p-3 gap-1 md:w-44 bg-muted/20">
-                        <p className="text-xs font-medium text-muted-foreground px-2 pb-2 uppercase tracking-wide">
-                            Atalhos
+                    <div className="flex flex-col border-r border-border p-3 gap-3 md:w-52 bg-muted/20">
+                        <p className="text-xs font-medium text-muted-foreground px-2 uppercase tracking-wide">
+                            Atalhos financeiros
                         </p>
-                        {presets.map((preset) => (
-                            <Button
-                                key={preset.label}
-                                variant="ghost"
-                                size="sm"
-                                className="justify-start text-left font-normal h-8"
-                                onClick={() => {
-                                    const value = preset.getValue()
-                                    setPending(value)
-                                    if (onDateChange) onDateChange(value)
-                                    setIsOpen(false)
-                                }}
-                            >
-                                {preset.label}
-                            </Button>
+                        {presetGroups.map((group) => (
+                            <div key={group.title} className="space-y-1">
+                                <p className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/80">
+                                    {group.title}
+                                </p>
+                                {group.items.map((preset) => (
+                                    <Button
+                                        key={preset.label}
+                                        variant="ghost"
+                                        size="sm"
+                                        className="w-full justify-start text-left font-normal h-8"
+                                        onClick={() => {
+                                            const value = preset.getValue()
+                                            setPending(value)
+                                            if (onDateChange) onDateChange(value)
+                                            setIsOpen(false)
+                                        }}
+                                    >
+                                        {preset.label}
+                                    </Button>
+                                ))}
+                            </div>
                         ))}
                     </div>
 
