@@ -1,22 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, DollarSign, Wallet, Download, Loader2, Calendar as CalendarIcon, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-    AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-    AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { EditTransactionModal } from "@/components/modals/EditTransactionModal";
-import { useDeleteTransaction } from "@/hooks/useUpdateTransaction";
-import { Transaction } from "@/hooks/useTransactions";
-import { useToast } from "@/hooks/use-toast";
+import { TrendingUp, TrendingDown, DollarSign, Wallet, Download, Loader2, Calendar as CalendarIcon } from "lucide-react";
 import {
     AreaChart,
     Area,
+    Line,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -25,10 +15,10 @@ import {
     BarChart,
     Bar,
     Legend,
+    ReferenceLine,
+    ReferenceDot,
 } from "recharts";
 import { useFinancialData } from "@/contexts/FinancialContext";
-import { buildCashflowChartData } from "@/lib/cashflowChartData";
-import { getCostDisplayName } from "@/lib/costNames";
 import { cn } from "@/lib/utils";
 import { CreateTransactionModal } from "@/components/modals/CreateTransactionModal";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
@@ -39,6 +29,7 @@ import {
     AccordionTrigger
 } from "@/components/ui/accordion";
 import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 interface CashflowItem {
     id: string;
@@ -69,10 +60,8 @@ const formatDate = (date: string) => {
 
 export function CashflowContent() {
     const { invoices, fixedCosts, variableCosts, transactions, selectedMonth, setSelectedMonth, dateRange, setDateRange, isLoading } = useFinancialData();
-    const deleteTransaction = useDeleteTransaction();
-    const { toast } = useToast();
-    const [editTarget, setEditTarget] = useState<Transaction | null>(null);
-    const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
+
+    const selectedMonthStr = useMemo(() => format(selectedMonth, 'yyyy-MM'), [selectedMonth]);
 
     const cashflowItems = useMemo<CashflowItem[]>(() => {
         if (isLoading) return [];
@@ -99,12 +88,12 @@ export function CashflowContent() {
             if (fc.month) {
                 items.push({
                     id: `fc-${fc.id}`,
-                    description: getCostDisplayName(fc),
+                    description: fc.description,
                     category: fc.category,
                     amount: fc.actual,
                     type: 'saida',
-                    date: fc.due_date || fc.month,
-                    status: fc.status === 'paid' ? 'completed' : 'pending'
+                    date: fc.month, // fc.month is already YYYY-MM-DD from DB
+                    status: 'completed'
                 });
             }
         });
@@ -114,12 +103,12 @@ export function CashflowContent() {
             if (vc.month) {
                 items.push({
                     id: `vc-${vc.id}`,
-                    description: getCostDisplayName(vc),
+                    description: vc.description || vc.category,
                     category: vc.category,
                     amount: vc.amount,
                     type: 'saida',
                     date: vc.month, // vc.month is already YYYY-MM-DD from DB
-                    status: vc.status === 'pending' ? 'pending' : 'completed'
+                    status: 'completed'
                 });
             }
         });
@@ -217,95 +206,113 @@ export function CashflowContent() {
 
     const sumCategory = (items: CashflowItem[]) => items.reduce((acc, i) => acc + i.amount, 0);
 
-    const handleDelete = () => {
-        if (!deleteTarget) return;
-        deleteTransaction.mutate(deleteTarget.id, {
-            onSuccess: () => {
-                toast({ title: "Transação excluída", description: `"${deleteTarget.description}" foi removida.` });
-                setDeleteTarget(null);
-            },
-            onError: (err) => toast({ variant: "destructive", title: "Erro ao excluir", description: err.message }),
-        });
-    };
-
-    const renderTransactionItem = (transaction: CashflowItem) => {
-        // Only transactions from the 'transactions' table are editable/deletable
-        const isRealTransaction = transaction.id.startsWith('tx-');
-        const originalTxId = isRealTransaction ? transaction.id.replace('tx-', '') : null;
-        const originalTx = originalTxId ? transactions.find(t => t.id === originalTxId) ?? null : null;
-
-        return (
-            <div
-                key={transaction.id}
-                className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-muted/50 transition-colors mb-2"
-            >
-                <div className="flex items-center gap-4">
-                    <div
-                        className={cn(
-                            "flex h-8 w-8 items-center justify-center rounded-full",
-                            transaction.type === "entrada"
-                                ? "bg-success/10 text-success"
-                                : "bg-destructive/10 text-destructive"
-                        )}
-                    >
-                        {transaction.type === "entrada" ? (
-                            <TrendingUp className="h-4 w-4" />
-                        ) : (
-                            <TrendingDown className="h-4 w-4" />
-                        )}
-                    </div>
-                    <div>
-                        <p className="font-medium text-sm">{transaction.description}</p>
-                        <p className="text-xs text-muted-foreground">
-                            {transaction.category} • {formatDate(transaction.date)}
-                        </p>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className="text-right">
-                        <p
-                            className={cn(
-                                "font-semibold text-sm",
-                                transaction.type === "entrada"
-                                    ? "text-success"
-                                    : "text-destructive"
-                            )}
-                        >
-                            {transaction.type === "entrada" ? "+" : "-"}{" "}
-                            {formatCurrency(transaction.amount)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                            {transaction.status === "completed" ? "Confirmado" : "Pendente"}
-                        </p>
-                    </div>
-                    {isRealTransaction && originalTx && (
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
-                                    <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => setEditTarget(originalTx)}>
-                                    <Pencil className="mr-2 h-4 w-4" /> Editar
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    onClick={() => setDeleteTarget(originalTx)}
-                                    className="text-destructive focus:text-destructive"
-                                >
-                                    <Trash2 className="mr-2 h-4 w-4" /> Excluir
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+    const renderTransactionItem = (transaction: CashflowItem) => (
+        <div
+            key={transaction.id}
+            className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-muted/50 transition-colors mb-2"
+        >
+            <div className="flex items-center gap-4">
+                <div
+                    className={cn(
+                        "flex h-8 w-8 items-center justify-center rounded-full",
+                        transaction.type === "entrada"
+                            ? "bg-success/10 text-success"
+                            : "bg-destructive/10 text-destructive"
+                    )}
+                >
+                    {transaction.type === "entrada" ? (
+                        <TrendingUp className="h-4 w-4" />
+                    ) : (
+                        <TrendingDown className="h-4 w-4" />
                     )}
                 </div>
+                <div>
+                    <p className="font-medium text-sm">{transaction.description}</p>
+                    <p className="text-xs text-muted-foreground">
+                        {transaction.category} • {formatDate(transaction.date)}
+                    </p>
+                </div>
             </div>
-        );
-    };
+            <div className="text-right">
+                <p
+                    className={cn(
+                        "font-semibold text-sm",
+                        transaction.type === "entrada"
+                            ? "text-success"
+                            : "text-destructive"
+                    )}
+                >
+                    {transaction.type === "entrada" ? "+" : "-"}{" "}
+                    {formatCurrency(transaction.amount)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                    {transaction.status === "completed" ? "Confirmado" : "Pendente"}
+                </p>
+            </div>
+        </div>
+    );
 
     const chartData = useMemo(() => {
-        return buildCashflowChartData(cashflowItems, selectedMonth, dateRange);
-    }, [cashflowItems, selectedMonth, dateRange]);
+        const map = new Map<string, { month: string, entradas: number, saidas: number, saldo: number, saldoPositivo: number, saldoNegativo: number }>();
+
+        for (let i = 5; i >= 0; i--) {
+            const d = new Date(selectedMonth);
+            d.setMonth(d.getMonth() - i);
+            const mStr = format(d, 'yyyy-MM');
+            map.set(mStr, {
+                // Utilizando ptBR importado do locale
+                month: format(d, 'MMM/yy', { locale: ptBR }),
+                entradas: 0,
+                saidas: 0,
+                saldo: 0,
+                saldoPositivo: 0,
+                saldoNegativo: 0,
+            });
+        }
+        let runningBalance = 0; // Se houver controle estrito, usar saldo prévio do Context
+
+        const itemsAsc = [...cashflowItems].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+        itemsAsc.forEach(item => {
+            if (!item.date) return;
+            const mStr = item.date.substring(0, 7);
+
+            // Incrementa o runningBalance para TODO o histórico (calculo real de saldo)
+            if (item.type === 'entrada') {
+                runningBalance += item.amount;
+            } else {
+                runningBalance -= item.amount;
+            }
+
+            if (map.has(mStr)) {
+                const entry = map.get(mStr)!;
+                const isInvestment = (item.category || "").toLowerCase().includes("investimento");
+
+                if (item.type === 'entrada') {
+                    if (!isInvestment) entry.entradas += item.amount;
+                } else {
+                    entry.saidas += item.amount;
+                }
+                entry.saldo = runningBalance;
+                entry.saldoPositivo = Math.max(runningBalance, 0);
+                entry.saldoNegativo = Math.min(runningBalance, 0);
+            }
+        });
+
+        return Array.from(map.values());
+    }, [cashflowItems, selectedMonth]);
+
+    const balanceChartInsights = useMemo(() => {
+        if (!chartData.length) {
+            return { minPoint: null, maxPoint: null, finalPoint: null };
+        }
+
+        const minPoint = chartData.reduce((acc, p) => (p.saldo < acc.saldo ? p : acc), chartData[0]);
+        const maxPoint = chartData.reduce((acc, p) => (p.saldo > acc.saldo ? p : acc), chartData[0]);
+        const finalPoint = chartData[chartData.length - 1];
+
+        return { minPoint, maxPoint, finalPoint };
+    }, [chartData]);
 
 
     if (isLoading) {
@@ -343,7 +350,7 @@ export function CashflowContent() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <MetricCard
                     title="Saldo Atual (Caixa)"
-                    value={formatCurrency(chartData[chartData.length - 1]?.saldo ?? 0)}
+                    value={formatCurrency(0)}
                     change={0}
                     icon={Wallet}
                     description="Saldo acumulado total"
@@ -391,33 +398,102 @@ export function CashflowContent() {
                         <CardTitle className="text-lg">Evolução do Saldo no Período</CardTitle>
                     </CardHeader>
                     <CardContent>
+                        <div className="grid grid-cols-1 gap-2 pb-4 sm:grid-cols-3">
+                            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+                                <p className="text-xs text-muted-foreground">Pior saldo</p>
+                                <p className="text-sm font-semibold text-destructive">
+                                    {balanceChartInsights.minPoint ? formatCurrency(balanceChartInsights.minPoint.saldo) : "R$ 0,00"}
+                                </p>
+                            </div>
+                            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+                                <p className="text-xs text-muted-foreground">Melhor saldo</p>
+                                <p className="text-sm font-semibold text-success">
+                                    {balanceChartInsights.maxPoint ? formatCurrency(balanceChartInsights.maxPoint.saldo) : "R$ 0,00"}
+                                </p>
+                            </div>
+                            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+                                <p className="text-xs text-muted-foreground">Saldo final</p>
+                                <p className={cn(
+                                    "text-sm font-semibold",
+                                    (balanceChartInsights.finalPoint?.saldo ?? 0) >= 0 ? "text-success" : "text-destructive"
+                                )}>
+                                    {balanceChartInsights.finalPoint ? formatCurrency(balanceChartInsights.finalPoint.saldo) : "R$ 0,00"}
+                                </p>
+                            </div>
+                        </div>
                         <div className="h-[300px]">
                             <ResponsiveContainer width="100%" height="100%">
                                 <AreaChart data={chartData}>
                                     <defs>
-                                        <linearGradient id="colorSaldo" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                                        <linearGradient id="colorSaldoPositivo" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.25} />
+                                            <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0.02} />
+                                        </linearGradient>
+                                        <linearGradient id="colorSaldoNegativo" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.02} />
+                                            <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0.25} />
                                         </linearGradient>
                                     </defs>
                                     <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                                     <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                                    <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v / 1000}k`} />
+                                    <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => formatCurrency(v)} width={92} />
                                     <Tooltip
                                         contentStyle={{
                                             backgroundColor: 'hsl(var(--card))',
                                             border: '1px solid hsl(var(--border))',
                                             borderRadius: '8px',
                                         }}
-                                        formatter={(value: number) => [formatCurrency(value), 'Saldo']}
+                                        formatter={(value: number, name: string) => {
+                                            if (name === "saldo") return [formatCurrency(value), "Saldo"];
+                                            return [formatCurrency(value), ""];
+                                        }}
+                                    />
+                                    <ReferenceLine
+                                        y={0}
+                                        stroke="hsl(var(--muted-foreground))"
+                                        strokeDasharray="4 4"
+                                        label={{ value: "Ponto de equilíbrio", fill: "hsl(var(--muted-foreground))", fontSize: 11, position: "insideTopRight" }}
                                     />
                                     <Area
                                         type="monotone"
+                                        dataKey="saldoPositivo"
+                                        stroke="none"
+                                        fillOpacity={1}
+                                        fill="url(#colorSaldoPositivo)"
+                                        isAnimationActive={false}
+                                    />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="saldoNegativo"
+                                        stroke="none"
+                                        fillOpacity={1}
+                                        fill="url(#colorSaldoNegativo)"
+                                        isAnimationActive={false}
+                                    />
+                                    <Line
+                                        type="monotone"
                                         dataKey="saldo"
                                         stroke="hsl(var(--primary))"
-                                        fillOpacity={1}
-                                        fill="url(#colorSaldo)"
+                                        strokeWidth={2}
+                                        dot={false}
+                                        isAnimationActive={false}
+                                        name="saldo"
                                     />
+                                    {balanceChartInsights.minPoint && (
+                                        <ReferenceDot x={balanceChartInsights.minPoint.month} y={balanceChartInsights.minPoint.saldo} r={5} fill="hsl(var(--destructive))" stroke="hsl(var(--background))" />
+                                    )}
+                                    {balanceChartInsights.maxPoint && (
+                                        <ReferenceDot x={balanceChartInsights.maxPoint.month} y={balanceChartInsights.maxPoint.saldo} r={5} fill="hsl(var(--success))" stroke="hsl(var(--background))" />
+                                    )}
+                                    {balanceChartInsights.finalPoint && (
+                                        <ReferenceDot
+                                            x={balanceChartInsights.finalPoint.month}
+                                            y={balanceChartInsights.finalPoint.saldo}
+                                            r={5}
+                                            fill={balanceChartInsights.finalPoint.saldo >= 0 ? "hsl(var(--success))" : "hsl(var(--destructive))"}
+                                            stroke="hsl(var(--background))"
+                                        />
+                                    )}
                                 </AreaChart>
                             </ResponsiveContainer>
                         </div>
@@ -427,7 +503,7 @@ export function CashflowContent() {
                 {/* Cash Flow Chart */}
                 <Card>
                     <CardHeader>
-                        <CardTitle className="text-lg">Entradas vs Saídas no Período</CardTitle>
+                        <CardTitle className="text-lg">Entradas vs Saídas</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="h-[300px]">
@@ -569,32 +645,6 @@ export function CashflowContent() {
                     </div>
                 </CardContent>
             </Card>
-
-            <EditTransactionModal
-                transaction={editTarget}
-                open={!!editTarget}
-                onOpenChange={(v) => !v && setEditTarget(null)}
-            />
-
-            <AlertDialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>Excluir transação?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            Tem certeza que deseja excluir "{deleteTarget?.description}"? Esta ação não pode ser desfeita.
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction
-                            onClick={handleDelete}
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        >
-                            Excluir
-                        </AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
         </div>
     );
 }
