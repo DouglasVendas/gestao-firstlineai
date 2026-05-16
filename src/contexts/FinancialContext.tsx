@@ -3,10 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Client } from "@/hooks/useClients";
 import { Invoice } from "@/hooks/useInvoices";
-import { FixedCost } from "@/hooks/useFixedCosts";
+import { FixedCost, fetchFixedCostOccurrences } from "@/hooks/useFixedCosts";
 import { VariableCost } from "@/hooks/useVariableCosts";
 import { Transaction } from "@/hooks/useTransactions";
 import { useEnsureTaxes } from "@/hooks/useEnsureTaxes";
+import { useFinancialSettings, FinancialSettings } from "@/hooks/useFinancialSettings";
 import { startOfMonth, endOfMonth } from "date-fns";
 import { DateRange } from "react-day-picker";
 
@@ -16,6 +17,8 @@ interface FinancialContextType {
     fixedCosts: FixedCost[];
     variableCosts: VariableCost[];
     transactions: Transaction[];
+    mrrChanges: any[];
+    settings?: FinancialSettings;
     isLoading: boolean;
     selectedMonth: Date;
     setSelectedMonth: (date: Date) => void;
@@ -32,12 +35,23 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
         to: endOfMonth(new Date())
     });
 
+    const { settings, isLoading: loadingSettings } = useFinancialSettings();
+
     const { data: clients, isLoading: loadingClients } = useQuery({
         queryKey: ["clients"],
         queryFn: async () => {
             const { data, error } = await supabase
                 .from("clients")
-                .select("*, plan:plans(name)")
+                .select(`
+                    *,
+                    plan:plans(name, price_monthly, price_yearly),
+                    subscriptions:client_subscriptions(
+                        *,
+                        product:products(*),
+                        plan:product_plans(*),
+                        addons:client_subscription_addons(*)
+                    )
+                `)
                 .order("name");
             if (error) throw error;
             return data as unknown as Client[];
@@ -57,15 +71,8 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
     });
 
     const { data: fixedCosts, isLoading: loadingFixed } = useQuery({
-        queryKey: ["fixed_costs"],
-        queryFn: async () => {
-            const { data, error } = await supabase
-                .from("fixed_costs")
-                .select("*")
-                .order("category");
-            if (error) throw error;
-            return data as unknown as FixedCost[];
-        },
+        queryKey: ["fixed_costs", selectedMonth.toISOString().slice(0, 7)],
+        queryFn: () => fetchFixedCostOccurrences(selectedMonth),
     });
 
     // ... (other queries)
@@ -81,7 +88,7 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
         queryFn: async () => {
             const { data, error } = await supabase
                 .from("variable_costs")
-                .select("*")
+                .select("*, attachments:cost_attachments(*)")
                 .order("month");
             if (error) throw error;
             return data as unknown as VariableCost[];
@@ -90,7 +97,7 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
 
     // Tax generation moved to useEnsureTaxes hook (C1 fix)
     // This hook checks if taxes exist for months with revenue and persists them to DB
-    useEnsureTaxes(invoices || [], variableCosts || []);
+    useEnsureTaxes(invoices || [], variableCosts || [], settings);
 
     // Variable costs now only includes DB-persisted entries (including auto-generated taxes)
     const allVariableCosts = useMemo(() => {
@@ -109,12 +116,26 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
         },
     });
 
+    const { data: mrrChanges, isLoading: loadingMRR } = useQuery({
+        queryKey: ["mrr_changes"],
+        queryFn: async () => {
+            const { data, error } = await supabase
+                .from("mrr_changes")
+                .select("*")
+                .order("change_date", { ascending: false });
+            if (error) throw error;
+            return data;
+        },
+    });
+
     const isLoading =
         loadingClients ||
         loadingInvoices ||
         loadingFixed ||
         loadingVariable ||
-        loadingTransactions;
+        loadingTransactions ||
+        loadingSettings ||
+        loadingMRR;
 
     const value = useMemo(() => ({
         clients: clients || [],
@@ -122,12 +143,14 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
         fixedCosts: allFixedCosts,
         variableCosts: allVariableCosts,
         transactions: transactions || [],
+        mrrChanges: mrrChanges || [],
+        settings,
         isLoading,
         selectedMonth,
         setSelectedMonth,
         dateRange,
         setDateRange
-    }), [clients, invoices, allFixedCosts, allVariableCosts, transactions, isLoading, selectedMonth, dateRange]);
+    }), [clients, invoices, allFixedCosts, allVariableCosts, transactions, settings, isLoading, selectedMonth, dateRange]);
 
     return (
         <FinancialContext.Provider value={value}>

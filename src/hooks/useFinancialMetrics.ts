@@ -1,6 +1,10 @@
 import { useMemo } from "react";
 import { useFinancialData } from "@/contexts/FinancialContext";
-import { startOfMonth, endOfMonth, isSameMonth, subMonths, startOfDay, eachMonthOfInterval, format, parseISO } from "date-fns";
+import { startOfMonth, endOfMonth, isSameMonth, subMonths, startOfDay, eachMonthOfInterval, format, parseISO, addMonths } from "date-fns";
+import { FinancialSettings } from "./useFinancialSettings";
+import { getEffectiveMRR } from "./useClients";
+import { calculateTotalCashBalance } from "@/lib/cashAccounts";
+import { useCashSummary } from "@/hooks/useCashAccounts";
 
 export interface DashboardMetrics {
     activeClients: number;
@@ -30,9 +34,10 @@ export interface DashboardMetrics {
 
 function calculateMetricsForMonth(
     date: Date,
-    data: { clients: any[], invoices: any[], fixedCosts: any[], variableCosts: any[] }
+    data: { clients: any[], invoices: any[], fixedCosts: any[], variableCosts: any[], mrrChanges: any[] },
+    settings?: FinancialSettings
 ): DashboardMetrics {
-    const { clients, invoices, fixedCosts, variableCosts } = data;
+    const { clients, invoices, fixedCosts, variableCosts, mrrChanges } = data;
     const monthStart = startOfMonth(date);
     const monthEnd = endOfMonth(date);
 
@@ -65,35 +70,49 @@ function calculateMetricsForMonth(
     const churnedInMonthCount = churnedInMonth.length;
     const churnRate = activeAtStart > 0 ? (churnedInMonthCount / activeAtStart) * 100 : 0;
 
-    // 3. MRR & ARR
-    // Os clientes no banco de dados agora já possuem o mrr calculado corretamente da Fase 1
-    const mrr = activeClients.reduce((sum, client) => {
-        const value = Number(client.mrr) || 0;
-        return sum + value;
-    }, 0);
+    // 3. MRR & ARR (P2 & P3 Fix)
+    const mrr = activeClients.reduce((sum, client) => sum + getEffectiveMRR(client), 0);
+    const arr = activeClients.reduce((sum, client) => sum + (getEffectiveMRR(client) * 12), 0);
 
-    const arr = mrr * 12;
+    // 4. REVENUE (DYNAMIC BASIS)
+    const accountingMethod = settings?.accounting_method || 'cash';
 
-    // 4. REVENUE (CASH BASIS)
     const revenue = invoices
         .filter(inv => {
-            if (inv.status !== 'paid' && inv.status !== 'pago') return false;
-            const paidDate = inv.paid_date ? parseISO(inv.paid_date) : null;
-            const dateToUse = paidDate || parseISO(inv.due_date);
-            return isSameMonth(dateToUse, date);
+            if (accountingMethod === 'cash') {
+                if (inv.status !== 'paid' && inv.status !== 'pago') return false;
+                const paidDate = inv.paid_date ? parseISO(inv.paid_date) : null;
+                const dateToUse = paidDate || parseISO(inv.due_date);
+                return isSameMonth(dateToUse, date);
+            } else {
+                // Accrual Basis (Competência) - Use due_date
+                const dueDate = parseISO(inv.due_date);
+                return isSameMonth(dueDate, date) && inv.status !== 'canceled';
+            }
         })
         .reduce((sum, inv) => sum + Number(inv.value), 0);
 
     // 5. EXPENSES
-    // 5. EXPENSES
     const totalFixedCosts = fixedCosts
-        .filter(c => c.month && isSameMonth(parseISO(c.month), date))
+        .filter(c => {
+            if (!c.month) return false;
+            const costDate = parseISO(c.month);
+            if (accountingMethod === 'cash') {
+                return isSameMonth(costDate, date) && (c.status === 'paid' || c.status === 'pago');
+            }
+            return isSameMonth(costDate, date) && c.status !== 'canceled';
+        })
         .reduce((sum, c) => sum + Number(c.actual), 0);
 
-    // Manual costs are now injected via Context into 'fixedCosts', so they are included above automatically.
-
     const totalVariableCosts = variableCosts
-        .filter(c => c.month && isSameMonth(parseISO(c.month), date))
+        .filter(c => {
+            if (!c.month) return false;
+            const costDate = parseISO(c.month);
+            if (accountingMethod === 'cash') {
+                return isSameMonth(costDate, date) && (c.status === 'paid' || c.status === 'pago');
+            }
+            return isSameMonth(costDate, date) && c.status !== 'canceled';
+        })
         .reduce((sum, c) => sum + Number(c.amount), 0);
 
     const totalExpenses = totalFixedCosts + totalVariableCosts;
@@ -102,39 +121,65 @@ function calculateMetricsForMonth(
     const netResult = revenue - totalExpenses;
     const netMargin = revenue > 0 ? (netResult / revenue) * 100 : 0;
 
-    // 7. MRR MOVEMENTS
-
-    // New MRR: From clients started in this month
+    // 7. MRR MOVEMENTS (P1 Fix)
     const newClients = clients.filter(c => {
         const startDate = c.start_date ? parseISO(c.start_date) : parseISO(c.created_at);
         return isSameMonth(startDate, date);
     });
-    const newMRR = newClients.reduce((sum, client) => sum + (Number(client.mrr) || 0), 0);
 
-    // Churn MRR: From clients churned in this month
-    const churnMRR = churnedInMonth.reduce((sum, client) => sum + (Number(client.mrr) || 0), 0);
+    const newMRR = newClients.reduce((sum, client) => sum + getEffectiveMRR(client), 0);
 
-    // Expansion/Contraction (Simplified Inference)
-    const expansionMRR = 0;
-    const contractionMRR = 0;
+    const churnMRR = churnedInMonth.reduce((sum, client) => sum + getEffectiveMRR(client), 0);
 
-    // 8. UNIT ECONOMICS
+    // Dynamic Expansion/Contraction from mrr_changes (P1)
+    const expansionMRR = mrrChanges
+        .filter(c => c.change_type === 'expansion' && isSameMonth(parseISO(c.change_date), date))
+        .reduce((sum, c) => sum + (Number(c.new_mrr) - Number(c.previous_mrr)), 0);
+
+    const contractionMRR = mrrChanges
+        .filter(c => c.change_type === 'contraction' && isSameMonth(parseISO(c.change_date), date))
+        .reduce((sum, c) => sum + (Number(c.previous_mrr) - Number(c.new_mrr)), 0);
+
+    // 8. UNIT ECONOMICS (P7 Fix)
     const arpu = activeClientsCount > 0 ? mrr / activeClientsCount : 0;
-    // use churnRate from this month.
-    const ltv = churnRate > 0 ? arpu / (churnRate / 100) : 0;
 
-    const marketingSpend = variableCosts
+    // Gross Margin calculation
+    const grossMargin = revenue > 0 ? (revenue - totalVariableCosts) / revenue : 0.7;
+
+    // LTV with margin. Cap at 36 months if churn is 0
+    const ltv = churnRate > 0
+        ? (arpu * grossMargin) / (churnRate / 100)
+        : arpu * grossMargin * 36;
+
+    // Correct CAC (P7): Include broader variable and fixed acquisition costs
+    const cacCategories = settings?.cac_categories || ['marketing', 'anúncio', 'ads', 'google', 'facebook', 'vendas', 'comercial'];
+
+    const acquisitionVariableSpend = variableCosts
         .filter(c => {
             if (!c.month || !isSameMonth(parseISO(c.month), date)) return false;
             const cat = c.category?.toLowerCase() || '';
-            return cat.includes('marketing') || cat.includes('anúncio') || cat.includes('ads') || cat.includes('google') || cat.includes('facebook');
+            return cacCategories.some(k => cat.includes(k));
         })
         .reduce((sum, c) => sum + Number(c.amount), 0);
 
+    const acquisitionFixedSpend = fixedCosts
+        .filter(c => {
+            if (!c.month || !isSameMonth(parseISO(c.month), date)) return false;
+            const cat = c.category?.toLowerCase() || '';
+            return cat.includes('comercial') || cat.includes('vendas');
+        })
+        .reduce((sum, c) => sum + Number(c.actual), 0);
+
+    const totalAcquisitionCost = acquisitionVariableSpend + acquisitionFixedSpend;
     const newClientsCount = newClients.length;
-    const cac = newClientsCount > 0 ? marketingSpend / newClientsCount : 0;
+    const cac = newClientsCount > 0 ? totalAcquisitionCost / newClientsCount : 0;
+
     const ratio = cac > 0 ? Number((ltv / cac).toFixed(2)) : 0;
-    const paybackTerm = (cac > 0 && arpu > 0) ? cac / arpu : 0;
+
+    // Payback considering margin
+    const paybackTerm = (cac > 0 && arpu > 0 && grossMargin > 0)
+        ? cac / (arpu * grossMargin)
+        : 0;
 
     // 9. QUICK STATS
     // Quick Ratio = (New MRR + Expansion) / (Churn MRR + Contraction)
@@ -142,7 +187,7 @@ function calculateMetricsForMonth(
     const quickRatio = losses > 0 ? (newMRR + expansionMRR) / losses : (newMRR > 0 ? 100 : 0);
 
     // Rule of 40 = Growth Rate + Profit Margin
-    // placeholder here, calculated in hook
+    // placeholder here, actual calculation in hook
     const ruleOf40 = 0;
 
     const nps = 0;
@@ -158,13 +203,8 @@ function calculateMetricsForMonth(
     ).size;
 
     // 10. RUNWAY & CASH BALANCE
-    // A lógica real do saldo inicial deverá consumir da tabela financial_settings criada na migration anterior
-    // Temporariamente usaremos um fallback de R$ 0.00 se o DB ainda não retornou, caso contrário ele se compõe.
-    // LOBBY DE DADOS DO DB PARA CASHFLOW
-
-    // Fallbacks simples local antes da RLS API carregar as Settings
-    const initialCashBalance = 0; // Isso virá do fetch Settings
-    const referenceDateStr = '2026-02-12';
+    const initialCashBalance = settings?.initial_balance || 0;
+    const referenceDateStr = settings?.balance_reference_date || '2026-03-01';
     const balanceRefDate = parseISO(referenceDateStr);
     const billingRefDate = startOfDay(balanceRefDate);
 
@@ -246,7 +286,7 @@ function calculateMetricsForMonth(
 
     let cashBalance = initialCashBalance + revenueDelta - totalExpenseDelta;
 
-    // Burn Rate & Runway logic
+    // Burn Rate & Runway logic based on Net Margin (simplified)
     let runway = 0;
     if (netResult < 0) {
         const burnRate = Math.abs(netResult);
@@ -283,14 +323,18 @@ function calculateMetricsForMonth(
 }
 
 export const useFinancialSnapshot = () => {
-    const { clients, invoices, fixedCosts, variableCosts, selectedMonth, isLoading } = useFinancialData();
-    const data = { clients, invoices, fixedCosts, variableCosts };
+    const { clients, invoices, fixedCosts, variableCosts, mrrChanges, selectedMonth, settings, isLoading } = useFinancialData();
+    const { accounts, movements, isLoading: isLoadingCash } = useCashSummary();
+    const data = { clients, invoices, fixedCosts, variableCosts, mrrChanges };
 
     const snapshot = useMemo(() => {
-        if (isLoading) return null;
+        if (isLoading || isLoadingCash) return null;
 
-        const current = calculateMetricsForMonth(selectedMonth, data);
-        const previous = calculateMetricsForMonth(subMonths(selectedMonth, 1), data);
+        const current = calculateMetricsForMonth(selectedMonth, data, settings);
+        const previous = calculateMetricsForMonth(subMonths(selectedMonth, 1), data, settings);
+        if (accounts.length > 0) {
+            current.cashBalance = calculateTotalCashBalance(accounts, movements);
+        }
 
         // Calculate Rule of 40
         // Growth Rate = (Current MRR - Previous MRR) / Previous MRR * 100
@@ -300,15 +344,15 @@ export const useFinancialSnapshot = () => {
         current.ruleOf40 = growthRate + current.netMargin;
 
         return { current, previous, isLoading: false };
-    }, [clients, invoices, fixedCosts, variableCosts, selectedMonth, isLoading]);
+    }, [clients, invoices, fixedCosts, variableCosts, selectedMonth, isLoading, isLoadingCash, settings, accounts, movements]);
 
     if (!snapshot) return { current: null, previous: null, isLoading: true };
     return snapshot;
 };
 
 export const useFinancialHistory = () => {
-    const { clients, invoices, fixedCosts, variableCosts, isLoading, selectedMonth } = useFinancialData();
-    const data = { clients, invoices, fixedCosts, variableCosts };
+    const { clients, invoices, fixedCosts, variableCosts, mrrChanges, isLoading, selectedMonth, settings } = useFinancialData();
+    const data = { clients, invoices, fixedCosts, variableCosts, mrrChanges };
 
     // Generate history for last 12 months ending in selectedMonth OR all time?
     // Dashboard charts usually show a fixed window (e.g. 12 months).
@@ -323,13 +367,13 @@ export const useFinancialHistory = () => {
 
         try {
             const months = eachMonthOfInterval({ start, end });
-            return months.map(date => calculateMetricsForMonth(date, data));
+            return months.map(date => calculateMetricsForMonth(date, data, settings));
         } catch (e) {
             console.error("Error generating history interval", e);
             return [];
         }
 
-    }, [clients, invoices, fixedCosts, variableCosts, selectedMonth, isLoading]);
+    }, [clients, invoices, fixedCosts, variableCosts, selectedMonth, isLoading, settings]);
 
     return history;
 };

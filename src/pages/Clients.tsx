@@ -31,6 +31,7 @@ import { Client } from "@/hooks/useClients"; // useClients exporta Client interf
 import { useUpdateClient, useDeleteClient } from "@/hooks/useUpdateClient";
 import { ClientStatusBadge } from "@/components/clients/ClientStatusBadge";
 import { CreateClientModal } from "@/components/modals/CreateClientModal";
+import { ClientImportModal } from "@/components/modals/ClientImportModal";
 import { EditClientModal } from "@/components/modals/EditClientModal";
 import { ClientDetailsModal } from "@/components/modals/ClientDetailsModal";
 import { useFinancialData } from "@/contexts/FinancialContext";
@@ -71,42 +72,41 @@ export default function Clients() {
   const monthStart = startOfMonth(selectedMonth);
   const monthEnd = endOfMonth(selectedMonth);
 
+  const CYCLE_MONTHS: Record<string, number | null> = {
+    monthly: null,
+    bimonthly: 2,
+    quarterly: 3,
+    semiannual: 6,
+    yearly: 12,
+  };
+
   const filteredClients = useMemo(() => {
     if (!clients) return [];
 
     const computed = clients.map(client => {
-      // Logic matching useFinancialMetrics
       const startDate = client.start_date ? parseISO(client.start_date) : parseISO(client.created_at);
       const churnDate = client.churn_date ? parseISO(client.churn_date) : null;
 
       let calculatedStatus = client.status;
 
-      // Determine status based on selectedMonth
       if (startDate > monthEnd) {
-        calculatedStatus = 'future'; // Not started yet in this context
+        calculatedStatus = 'future';
       } else if (churnDate && churnDate < monthStart) {
-        calculatedStatus = 'churned_past'; // Previously churned
+        calculatedStatus = 'churned_past';
       } else if (churnDate && churnDate <= monthEnd) {
-        calculatedStatus = 'churned'; // Churned in this month (or on first day)
+        calculatedStatus = 'churned';
       } else {
-        // Active in this month context.
-        // Now check for 'overdue' if active
-        // TODO: Check overdue invoices relative to selectedMonth? 
-        // Or just current overdue status? Usually overdue is a current state.
-        // If we are looking at specific month, seeing "Overdue" might be confusing if they paid later.
-        // For historical accuracy, we should check if they had overdue invoices AT THAT TIME. 
-        // But that's complex. Let's stick to "Active" for historical view, or specific status if known.
-        // For now, let's keep 'active' if they basically existed and didn't churn.
-        calculatedStatus = 'active';
+        calculatedStatus = client.status === 'trial' ? 'trial' : 'active';
 
-        // Check 'trial'
-        if (client.status === 'trial') {
-          // If trial end date < monthStart, maybe they converted?
-          // This depends on how trial status is stored (if historical).
-          // Assuming 'trial' status in DB is current.
-          // For historical, if they changed to active, we might not know when.
-          // Let's rely on DB status if it matches the timeframe, otherwise 'active'.
-          if (client.status === 'trial') calculatedStatus = 'trial';
+        // Para planos de ciclo (não-mensal): verificar se o ciclo expirou
+        const cycleDuration = CYCLE_MONTHS[client.billing_cycle || 'monthly'];
+        if (cycleDuration !== null) {
+          const duration = client.contract_duration || cycleDuration;
+          const cycleEnd = new Date(startDate);
+          cycleEnd.setMonth(cycleEnd.getMonth() + duration);
+          if (monthStart > cycleEnd) {
+            calculatedStatus = 'expired';
+          }
         }
       }
 
@@ -138,11 +138,9 @@ export default function Clients() {
       else if (statusFilter === "active") matchesStatus = client.calculatedStatus === "active" || client.calculatedStatus === "trial";
       else if (statusFilter === "churned") matchesStatus = client.calculatedStatus === "churned" || client.calculatedStatus === "churned_past";
       else if (statusFilter === "renewing") matchesStatus = isRenewing;
-      else if (statusFilter === "overdue") matchesStatus = client.status === "churned"; // Proxy for 'Inadimplentes' based on user context
+      else if (statusFilter === "overdue") matchesStatus = client.calculatedStatus === "expired" || client.status === "churned";
       else matchesStatus = client.calculatedStatus === statusFilter;
 
-      // Optional: hide 'future' clients or 'churned_past' if generic view?
-      // If "All", show everything? Maybe hide future.
       if (client.calculatedStatus === 'future') matchesStatus = false;
 
       return matchesSearch && matchesStatus;
@@ -274,6 +272,7 @@ export default function Clients() {
             <Download className="mr-2 h-4 w-4" />
             Exportar
           </Button>
+          <ClientImportModal />
           <CreateClientModal />
         </div>
       </div>
@@ -378,12 +377,23 @@ export default function Clients() {
               </thead>
               <tbody>
                 {filteredClients.map((client) => {
+                  const subscriptionLabels = client.subscriptions?.map((subscription) => (
+                    `${subscription.product?.name || "Produto"} / ${subscription.plan?.name || "Plano"}`
+                  )) || [];
+                  const productLabels = client.subscriptions?.length
+                    ? client.subscriptions.map((subscription) => subscription.product?.name).filter(Boolean)
+                    : client.products || [];
+
                   return (
                     <tr key={client.id}>
                       <td className="font-medium">{client.name}</td>
                       <td className="py-3">
                         <div className="flex flex-col gap-1">
-                          <span className="font-medium">{client.plan?.name || "Sem Plano"}</span>
+                          <span className="font-medium">
+                            {subscriptionLabels.length > 0
+                              ? subscriptionLabels.join(" + ")
+                              : client.plan?.name || "Sem Plano"}
+                          </span>
                           {client.billing_cycle && (
                             <span className={cn(
                               "inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium w-fit border",
@@ -403,7 +413,7 @@ export default function Clients() {
                       </td>
                       <td>
                         <div className="flex flex-wrap gap-1">
-                          {client.products?.map((prod) => (
+                          {productLabels.map((prod) => (
                             <span key={prod} className={cn(
                               "inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium border",
                               prod === 'CRM' ? "bg-indigo-50 text-indigo-700 border-indigo-200" : "bg-violet-50 text-violet-700 border-violet-200"
@@ -411,7 +421,7 @@ export default function Clients() {
                               {prod}
                             </span>
                           ))}
-                          {!client.products?.length && <span className="text-xs text-muted-foreground">-</span>}
+                          {!productLabels.length && <span className="text-xs text-muted-foreground">-</span>}
                         </div>
                       </td>
                       <td className="font-mono">{formatCurrency(client.mrr)}</td>
@@ -423,63 +433,61 @@ export default function Clients() {
                           if (!client.start_date && !client.created_at) return <span className="text-muted-foreground">-</span>;
 
                           const startDate = parseISO(client.start_date || client.created_at);
-                          let endDate = new Date();
-                          let monthsToRenew = 0;
-                          let isMonthlyNoContract = false;
+                          const today = new Date();
+                          const isMonthly = client.billing_cycle === 'monthly' || !client.billing_cycle;
 
-                          if (client.status === 'churned' && client.churn_date) {
-                            endDate = parseISO(client.churn_date);
-                            // Calculate months from today to churn date (likely negative)
-                            const today = new Date();
-                            monthsToRenew = (endDate.getFullYear() - today.getFullYear()) * 12 + (endDate.getMonth() - today.getMonth());
-                          } else if (client.billing_cycle === 'monthly' && (!client.contract_duration || client.contract_duration < 12)) {
-                            // Monthly without annual contract
-                            isMonthlyNoContract = true;
-                            // For display purposes, user wants "1 mês"
-                            // We set endDate to implicit next month or just handle message directly
-                            const today = new Date();
-                            endDate = new Date(today);
-                            endDate.setMonth(today.getMonth() + 1); // Mock end date = next month
-                            monthsToRenew = 1;
-                          } else {
-                            // Standard contract logic
-                            const duration = client.contract_duration || 12; // Default 12 if not specified and not caught above
-                            endDate = new Date(startDate);
-                            endDate.setMonth(endDate.getMonth() + duration);
-
-                            const today = new Date();
-                            monthsToRenew = (endDate.getFullYear() - today.getFullYear()) * 12 + (endDate.getMonth() - today.getMonth());
+                          // Plano mensal recorrente — sem data de fim
+                          if (isMonthly && client.status !== 'churned') {
+                            return (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-xs text-muted-foreground">Início: {format(startDate, 'dd/MM/yyyy')}</span>
+                                <span className={cn(
+                                  "inline-flex items-center justify-center rounded-md px-3 py-1 text-sm font-bold border shadow-sm w-fit",
+                                  "bg-blue-50 text-blue-700 border-blue-200"
+                                )}>
+                                  <span className="text-base">Recorrente</span>
+                                </span>
+                              </div>
+                            );
                           }
 
-                          // UX Logic (User Request):
-                          // > 2 months: Green (Normal)
-                          // 1-2 months: Orange (Warning 60-30 days)
-                          // <= 0 months: Red (Critical < 30 days)
+                          // Cancelado
+                          if (client.status === 'churned' && client.churn_date) {
+                            const churnDate = parseISO(client.churn_date);
+                            return (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-xs text-muted-foreground">Fim: {format(churnDate, 'dd/MM/yyyy')}</span>
+                                <span className={cn(
+                                  "inline-flex items-center justify-center rounded-md px-3 py-1 text-sm font-bold border shadow-sm w-fit",
+                                  "bg-red-100 text-red-800 border-red-200"
+                                )}>
+                                  <span className="text-base">Cancelado</span>
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          // Plano de ciclo (trimestral / semestral / anual)
+                          const duration = client.contract_duration || CYCLE_MONTHS[client.billing_cycle || 'monthly'] || 12;
+                          const endDate = new Date(startDate);
+                          endDate.setMonth(endDate.getMonth() + duration);
+                          const monthsToRenew = (endDate.getFullYear() - today.getFullYear()) * 12 + (endDate.getMonth() - today.getMonth());
 
                           let badgeColor = "bg-green-100 text-green-800 border-green-200";
                           let message = "";
 
-                          if (client.status === 'churned') {
-                            badgeColor = "bg-red-100 text-red-800 border-red-200";
-                            message = "Cancelado";
-                          } else if (isMonthlyNoContract) {
-                            // "informar 1 mês"
-                            // 1 month falls into Orange (1-2 months)
+                          if (monthsToRenew > 2) {
+                            badgeColor = "bg-green-100 text-green-800 border-green-200";
+                            message = `${monthsToRenew} meses`;
+                          } else if (monthsToRenew >= 1) {
                             badgeColor = "bg-orange-100 text-orange-800 border-orange-200";
-                            message = "1 mês (Mensal)";
+                            message = `${monthsToRenew} meses`;
+                          } else if (monthsToRenew === 0) {
+                            badgeColor = "bg-orange-100 text-orange-800 border-orange-200";
+                            message = "Este mês";
                           } else {
-                            if (monthsToRenew > 2) {
-                              badgeColor = "bg-green-100 text-green-800 border-green-200";
-                              message = `${monthsToRenew} meses`;
-                            } else if (monthsToRenew >= 1) {
-                              badgeColor = "bg-orange-100 text-orange-800 border-orange-200";
-                              message = `${monthsToRenew} meses`;
-                            } else {
-                              // 0 or negative
-                              badgeColor = "bg-red-100 text-red-800 border-red-200";
-                              if (monthsToRenew === 0) message = "Este mês";
-                              else message = `Vencido (${Math.abs(monthsToRenew)} m)`;
-                            }
+                            badgeColor = "bg-red-100 text-red-800 border-red-200";
+                            message = `Vencido (${Math.abs(monthsToRenew)} m)`;
                           }
 
                           return (

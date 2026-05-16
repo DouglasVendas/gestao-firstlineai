@@ -1,7 +1,10 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { VariableCostsTable } from "@/components/costs/VariableCostsTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { TrendingDown, Percent, Users, AlertTriangle, Loader2 } from "lucide-react";
 import {
     PieChart,
@@ -13,12 +16,23 @@ import {
 import { useFinancialData } from "@/contexts/FinancialContext";
 import { formatCurrency } from "@/lib/formatters";
 import { CreateVariableCostModal } from "@/components/modals/CreateVariableCostModal";
+import { CostsImportModal } from "@/components/modals/CostsImportModal";
 import { isSameMonth, parseISO } from "date-fns";
+import { useFinancialSettings } from "@/hooks/useFinancialSettings";
+import { isAutomaticTaxCost, TAX_NAME } from "@/utils/automaticTaxes";
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
 
 export function VariableCostsContent() {
-    const { variableCosts, selectedMonth, isLoading } = useFinancialData();
+    const { variableCosts, selectedMonth, isLoading, clients, invoices, settings } = useFinancialData();
+    const { updateSettings, isUpdating } = useFinancialSettings();
+    const [taxRateInput, setTaxRateInput] = useState("6");
+
+    useEffect(() => {
+        if (settings?.tax_rate !== undefined) {
+            setTaxRateInput((settings.tax_rate * 100).toString());
+        }
+    }, [settings?.tax_rate]);
 
     const filteredCosts = useMemo(() => {
         if (!variableCosts) return [];
@@ -45,6 +59,41 @@ export function VariableCostsContent() {
         return { totalVariableCosts: total, categoryData: catData };
     }, [filteredCosts]);
 
+    const automaticTaxCost = useMemo(() => {
+        return filteredCosts.find(isAutomaticTaxCost);
+    }, [filteredCosts]);
+
+    const confirmedReceipts = useMemo(() => {
+        return (invoices || [])
+            .filter(inv => {
+                const isPaid = inv.status === "paid" || (inv.status as string) === "pago";
+                return isPaid && inv.paid_date && isSameMonth(parseISO(inv.paid_date), selectedMonth);
+            })
+            .reduce((acc, inv) => acc + Number(inv.value), 0);
+    }, [invoices, selectedMonth]);
+
+    const handleSaveTaxRate = async () => {
+        const taxRate = Math.max(0, Number(taxRateInput || 0)) / 100;
+        await updateSettings({ tax_rate: taxRate });
+    };
+
+    // Derived metrics
+    const activeClientsCount = useMemo(() => {
+        if (!clients) return 0;
+        return clients.filter(c => c.status === 'active' || c.status === 'trial').length;
+    }, [clients]);
+
+    const totalMRR = useMemo(() => {
+        if (!clients) return 0;
+        return clients
+            .filter(c => c.status === 'active' || c.status === 'trial')
+            .reduce((acc, c) => acc + (c.mrr || 0), 0);
+    }, [clients]);
+
+    // Margem de Contribuição = MRR - Custos Variáveis
+    const margemContribuicao = totalMRR > 0 ? ((totalMRR - totalVariableCosts) / totalMRR) * 100 : 0;
+    const custoMedioCliente = activeClientsCount > 0 ? totalVariableCosts / activeClientsCount : 0;
+
     if (isLoading) {
         return (
             <div className="flex h-[400px] items-center justify-center">
@@ -55,9 +104,48 @@ export function VariableCostsContent() {
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+                <CostsImportModal defaultTab="variable" />
                 <CreateVariableCostModal />
             </div>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="text-lg">{TAX_NAME}</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+                    <div className="grid gap-4 sm:grid-cols-3">
+                        <div className="space-y-2">
+                            <Label>Alíquota (%)</Label>
+                            <Input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={taxRateInput}
+                                onChange={(event) => setTaxRateInput(event.target.value)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Recebimentos confirmados</Label>
+                            <div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 font-mono text-sm">
+                                {formatCurrency(confirmedReceipts)}
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Vencimento</Label>
+                            <div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm">
+                                Dia 20
+                            </div>
+                        </div>
+                    </div>
+                    <Button onClick={handleSaveTaxRate} disabled={isUpdating}>
+                        Salvar percentual
+                    </Button>
+                    <div className="md:col-span-2 text-sm text-muted-foreground">
+                        Valor atual: {formatCurrency(automaticTaxCost?.amount || 0)}
+                    </div>
+                </CardContent>
+            </Card>
 
             {/* Metric Cards */}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -71,18 +159,18 @@ export function VariableCostsContent() {
                 />
                 <MetricCard
                     title="Margem de Contribuição"
-                    value="N/A"
+                    value={totalMRR > 0 ? `${margemContribuicao.toFixed(1)}%` : "—"}
                     change={0}
                     icon={<Percent className="h-6 w-6" />}
-                    description="Dados insuficientes"
-                    variant="default"
+                    description="MRR menos custos variáveis"
+                    variant={margemContribuicao < 30 ? "danger" : "default"}
                 />
                 <MetricCard
                     title="Custo Médio por Cliente"
-                    value="N/A"
+                    value={activeClientsCount > 0 ? formatCurrency(custoMedioCliente) : "—"}
                     change={0}
                     icon={<Users className="h-6 w-6" />}
-                    description="Dados insuficientes"
+                    description={`Base: ${activeClientsCount} clientes ativos`}
                     variant="default"
                 />
                 <MetricCard
