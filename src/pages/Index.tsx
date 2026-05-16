@@ -22,7 +22,7 @@ import { GrowthMetrics } from "@/components/dashboard/growth/GrowthMetrics";
 import { RetentionMetrics } from "@/components/dashboard/retention/RetentionMetrics";
 
 import { useSettings } from "@/hooks/useSettings";
-import React;
+import React from "react";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
