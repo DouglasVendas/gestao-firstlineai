@@ -25,6 +25,7 @@ import {
     BarChart,
     Bar,
     Legend,
+    ReferenceLine,
 } from "recharts";
 import { useFinancialData } from "@/contexts/FinancialContext";
 import { buildCashflowChartData } from "@/lib/cashflowChartData";
@@ -307,6 +308,18 @@ export function CashflowContent() {
         return buildCashflowChartData(cashflowItems, selectedMonth, dateRange);
     }, [cashflowItems, selectedMonth, dateRange]);
 
+    const balanceTrend = useMemo(() => {
+        if (chartData.length === 0) return { tone: 'neutral' as const, color: 'hsl(var(--primary))' };
+        const hasNegative = chartData.some(d => d.saldo < 0);
+        const hasPositive = chartData.some(d => d.saldo > 0);
+        if (hasNegative && !hasPositive) return { tone: 'negative' as const, color: 'hsl(var(--destructive))' };
+        if (hasPositive && !hasNegative) return { tone: 'positive' as const, color: 'hsl(142 76% 36%)' };
+        return { tone: 'mixed' as const, color: 'hsl(var(--primary))' };
+    }, [chartData]);
+
+    const compactCurrency = (v: number) =>
+        new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 }).format(v);
+
 
     if (isLoading) {
         return (
@@ -393,16 +406,20 @@ export function CashflowContent() {
                     <CardContent>
                         <div className="h-[300px]">
                             <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={chartData}>
+                                <AreaChart data={chartData} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
                                     <defs>
                                         <linearGradient id="colorSaldo" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                                            <stop offset="5%" stopColor={balanceTrend.color} stopOpacity={0.35} />
+                                            <stop offset="95%" stopColor={balanceTrend.color} stopOpacity={0} />
                                         </linearGradient>
                                     </defs>
                                     <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                                     <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                                    <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v / 1000}k`} />
+                                    <YAxis
+                                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                                        tickFormatter={(v) => compactCurrency(v)}
+                                        width={70}
+                                    />
                                     <Tooltip
                                         contentStyle={{
                                             backgroundColor: 'hsl(var(--card))',
@@ -411,12 +428,22 @@ export function CashflowContent() {
                                         }}
                                         formatter={(value: number) => [formatCurrency(value), 'Saldo']}
                                     />
+                                    <ReferenceLine
+                                        y={0}
+                                        stroke="hsl(var(--muted-foreground))"
+                                        strokeDasharray="4 4"
+                                        strokeOpacity={0.6}
+                                        label={{ value: 'R$ 0', position: 'insideRight', fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                                    />
                                     <Area
-                                        type="monotone"
+                                        type="linear"
                                         dataKey="saldo"
-                                        stroke="hsl(var(--primary))"
+                                        stroke={balanceTrend.color}
+                                        strokeWidth={2}
                                         fillOpacity={1}
                                         fill="url(#colorSaldo)"
+                                        dot={{ r: 3, fill: balanceTrend.color, stroke: balanceTrend.color }}
+                                        activeDot={{ r: 5 }}
                                     />
                                 </AreaChart>
                             </ResponsiveContainer>
