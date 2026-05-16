@@ -27,6 +27,7 @@ import {
     Legend,
 } from "recharts";
 import { useFinancialData } from "@/contexts/FinancialContext";
+import { buildCashflowChartData } from "@/lib/cashflowChartData";
 import { getCostDisplayName } from "@/lib/costNames";
 import { cn } from "@/lib/utils";
 import { CreateTransactionModal } from "@/components/modals/CreateTransactionModal";
@@ -38,7 +39,6 @@ import {
     AccordionTrigger
 } from "@/components/ui/accordion";
 import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 
 interface CashflowItem {
     id: string;
@@ -73,8 +73,6 @@ export function CashflowContent() {
     const { toast } = useToast();
     const [editTarget, setEditTarget] = useState<Transaction | null>(null);
     const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
-
-    const selectedMonthStr = useMemo(() => format(selectedMonth, 'yyyy-MM'), [selectedMonth]);
 
     const cashflowItems = useMemo<CashflowItem[]>(() => {
         if (isLoading) return [];
@@ -306,48 +304,8 @@ export function CashflowContent() {
     };
 
     const chartData = useMemo(() => {
-        const map = new Map<string, { month: string, entradas: number, saidas: number, saldo: number }>();
-
-        for (let i = 5; i >= 0; i--) {
-            const d = new Date(selectedMonth);
-            d.setMonth(d.getMonth() - i);
-            const mStr = format(d, 'yyyy-MM');
-            map.set(mStr, {
-                // Utilizando ptBR importado do locale
-                month: format(d, 'MMM/yy', { locale: ptBR }),
-                entradas: 0,
-                saidas: 0,
-                saldo: 0
-            });
-        }
-        let runningBalance = 0; // Se houver controle estrito, usar saldo prévio do Context
-
-        cashflowItems.forEach(item => {
-            if (!item.date) return;
-            const mStr = item.date.substring(0, 7);
-
-            // Incrementa o runningBalance para TODO o histórico (calculo real de saldo)
-            if (item.type === 'entrada') {
-                runningBalance += item.amount;
-            } else {
-                runningBalance -= item.amount;
-            }
-
-            if (map.has(mStr)) {
-                const entry = map.get(mStr)!;
-                const isInvestment = (item.category || "").toLowerCase().includes("investimento");
-
-                if (item.type === 'entrada') {
-                    if (!isInvestment) entry.entradas += item.amount;
-                } else {
-                    entry.saidas += item.amount;
-                }
-                entry.saldo = runningBalance;
-            }
-        });
-
-        return Array.from(map.values());
-    }, [cashflowItems, selectedMonth]);
+        return buildCashflowChartData(cashflowItems, selectedMonth, dateRange);
+    }, [cashflowItems, selectedMonth, dateRange]);
 
 
     if (isLoading) {
@@ -430,7 +388,7 @@ export function CashflowContent() {
                 {/* Balance Evolution Chart */}
                 <Card>
                     <CardHeader>
-                        <CardTitle className="text-lg">Evolução do Saldo (6 Meses)</CardTitle>
+                        <CardTitle className="text-lg">Evolução do Saldo no Período</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="h-[300px]">
@@ -469,7 +427,7 @@ export function CashflowContent() {
                 {/* Cash Flow Chart */}
                 <Card>
                     <CardHeader>
-                        <CardTitle className="text-lg">Entradas vs Saídas</CardTitle>
+                        <CardTitle className="text-lg">Entradas vs Saídas no Período</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="h-[300px]">
