@@ -39,6 +39,7 @@ import { useToast } from "@/hooks/use-toast"; // or components/ui/use-toast
 import { startOfMonth, endOfMonth, parseISO, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { formatClientName } from "@/lib/clientNames";
+import { calculateClientProjectedRevenue, calculateProjectedClientsRevenue } from "@/lib/clientRevenue";
 
 // Helper functions (could be moved to utils)
 const formatCurrency = (value: number) => {
@@ -154,9 +155,10 @@ export default function Clients() {
     const active = filteredClients.filter(c => c.calculatedStatus === 'active').length;
     const trial = filteredClients.filter(c => c.calculatedStatus === 'trial').length;
     const churned = filteredClients.filter(c => c.calculatedStatus === 'churned').length;
+    const projectedRevenue = calculateProjectedClientsRevenue(filteredClients);
     // Note: churned here is "Churned IN this month" if we filter properly, or total churned depending on list content.
     // Dashboard shows "Active Clients" (Count).
-    return { active, trial, churned };
+    return { active, trial, churned, projectedRevenue };
   }, [filteredClients]);
 
   const handleExport = () => {
@@ -180,11 +182,7 @@ export default function Clients() {
       const contractEndDate = new Date(startDate);
       contractEndDate.setMonth(contractEndDate.getMonth() + contractDuration);
 
-      const today = new Date();
-      const remainingTime = contractEndDate.getTime() - today.getTime();
-      const isExpired = remainingTime < 0;
-      const remainingMonths = isExpired ? 0 : Math.ceil(remainingTime / (1000 * 60 * 60 * 24 * 30));
-      const projectedRevenue = remainingMonths * c.mrr;
+      const projectedRevenue = calculateClientProjectedRevenue(c);
 
       return [
         formatClientName(c.name),
@@ -343,7 +341,7 @@ export default function Clients() {
       </div>
 
       {/* Stats Summary */}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <div className="metric-card">
           <p className="text-sm text-muted-foreground">Total de Clientes</p>
           <p className="mt-1 font-mono text-2xl font-semibold text-foreground">{filteredClients.length}</p>
@@ -360,6 +358,11 @@ export default function Clients() {
           <p className="text-sm text-muted-foreground">Churned (Total)</p>
           <p className="mt-1 font-mono text-2xl font-semibold text-destructive">{stats.churned}</p>
         </div>
+        <div className="metric-card">
+          <p className="text-sm text-muted-foreground">Receita Projetada</p>
+          <p className="mt-1 font-mono text-2xl font-semibold text-primary">{formatCurrency(stats.projectedRevenue)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Contratos + 12m recorrente</p>
+        </div>
       </div>
 
       {/* Clients Table */}
@@ -374,6 +377,7 @@ export default function Clients() {
                   <th>Produtos</th>
                   <th>MRR</th>
                   <th>Status</th>
+                  <th>Receita Projetada</th>
                   <th>Contrato & Renovação</th>
                   <th></th>
                 </tr>
@@ -442,6 +446,7 @@ export default function Clients() {
                       <td>
                         <ClientStatusBadge status={client.calculatedStatus || client.status} />
                       </td>
+                      <td className="font-mono">{formatCurrency(calculateClientProjectedRevenue(client))}</td>
                       <td>
                         {(() => {
                           if (!client.start_date && !client.created_at) return <span className="text-muted-foreground">-</span>;

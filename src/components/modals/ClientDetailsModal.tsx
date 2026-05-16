@@ -19,6 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { formatClientName } from "@/lib/clientNames";
+import { calculateClientProjectedRevenue, getProjectedRevenueMonths } from "@/lib/clientRevenue";
 import { Client, getEffectiveMRR } from "@/hooks/useClients";
 import { Invoice } from "@/hooks/useInvoices";
 import { ClientStatusBadge } from "@/components/clients/ClientStatusBadge";
@@ -129,6 +130,8 @@ export function ClientDetailsModal({
     const lifetimeMonths = diffInMonths(startDate, endDate);
     const lifetimeLabel = lifetimeMonths < 1 ? "Novo cliente" : `${lifetimeMonths} meses`;
     const effectiveMrr = getEffectiveMRR(client);
+    const projectedRevenueMonths = getProjectedRevenueMonths(client, today);
+    const projectedRevenue = calculateClientProjectedRevenue(client, today);
 
     const contractDuration = client.contract_duration || 12;
     const contractEndDate = new Date(startDate);
@@ -297,8 +300,9 @@ export function ClientDetailsModal({
                                             </p>
                                         </div>
                                         <div className="rounded-md bg-muted/30 p-3">
-                                            <p className="text-xs text-muted-foreground">ARR estimado</p>
-                                            <p className="mt-1 font-mono text-lg font-semibold">{formatCurrency(effectiveMrr * 12)}</p>
+                                            <p className="text-xs text-muted-foreground">Receita projetada</p>
+                                            <p className="mt-1 font-mono text-lg font-semibold">{formatCurrency(projectedRevenue)}</p>
+                                            <p className="mt-1 text-xs text-muted-foreground">{projectedRevenueMonths} meses considerados</p>
                                         </div>
                                     </div>
                                 </div>
