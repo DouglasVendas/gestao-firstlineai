@@ -19,6 +19,7 @@ import {
   parseClientImportRows,
   ParsedClientImportRow,
 } from "@/lib/clientImport";
+import { formatClientName } from "@/lib/clientNames";
 
 const TEMPLATE_HEADERS = [
   "nome", "email", "plano", "ciclo_cobranca", "mrr", "status",
@@ -140,7 +141,7 @@ export function ClientImportModal() {
       }
 
       const payload = {
-        name: row.name,
+        name: formatClientName(row.name),
         email: row.email,
         organization_id: orgId,
         plan_id,
@@ -171,7 +172,7 @@ export function ClientImportModal() {
       if (error) {
         errors++;
         if (errorMessages.length < 5) {
-          errorMessages.push(`${row.name}: ${error.message}`);
+          errorMessages.push(`${formatClientName(row.name)}: ${error.message}`);
         }
       }
       else if (savedClient) {

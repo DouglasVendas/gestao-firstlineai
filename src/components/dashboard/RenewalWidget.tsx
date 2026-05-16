@@ -5,6 +5,7 @@ import { format, addMonths, parseISO, differenceInDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useClients } from "@/hooks/useClients";
 import { Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { formatClientName } from "@/lib/clientNames";
 
 export function RenewalWidget() {
     const { data: clients, isLoading } = useClients();
@@ -90,7 +91,7 @@ export function RenewalWidget() {
                     <TableBody>
                         {upcomingRenewals.map((client) => (
                             <TableRow key={client!.id}>
-                                <TableCell className="font-medium">{client!.name}</TableCell>
+                                <TableCell className="font-medium">{formatClientName(client!.name)}</TableCell>
                                 <TableCell>
                                     <Badge variant="outline" className="text-xs">
                                         {client!.period}

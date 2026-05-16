@@ -12,6 +12,7 @@ import { Check, Download, FileText, ChevronRight, ChevronLeft, Loader2, Wand2, U
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useToast } from "@/components/ui/use-toast";
+import { formatClientName } from "@/lib/clientNames";
 
 export function ContractGenerator() {
     const { data: clients, isLoading } = useClients();
@@ -220,7 +221,7 @@ export function ContractGenerator() {
                                                     </SelectTrigger>
                                                     <SelectContent>
                                                         {clients?.map(client => (
-                                                            <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>
+                                                            <SelectItem key={client.id} value={client.id}>{formatClientName(client.name)}</SelectItem>
                                                         ))}
                                                     </SelectContent>
                                                 </Select>
@@ -324,7 +325,7 @@ export function ContractGenerator() {
                                     </SelectTrigger>
                                     <SelectContent>
                                         {clients?.map(client => (
-                                            <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>
+                                            <SelectItem key={client.id} value={client.id}>{formatClientName(client.name)}</SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>

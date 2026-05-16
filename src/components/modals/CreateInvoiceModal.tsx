@@ -31,6 +31,7 @@ import {
 import { useCreateInvoice } from "@/hooks/useInvoices";
 import { useClients } from "@/hooks/useClients";
 import { useToast } from "@/hooks/use-toast";
+import { formatClientName } from "@/lib/clientNames";
 import { Loader2, Plus } from "lucide-react";
 
 const formSchema = z.object({
@@ -114,7 +115,7 @@ export function CreateInvoiceModal() {
                                         <SelectContent>
                                             {clients?.map((client) => (
                                                 <SelectItem key={client.id} value={client.id}>
-                                                    {client.name}
+                                                    {formatClientName(client.name)}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>

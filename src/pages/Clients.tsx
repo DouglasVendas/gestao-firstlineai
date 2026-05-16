@@ -38,6 +38,7 @@ import { useFinancialData } from "@/contexts/FinancialContext";
 import { useToast } from "@/hooks/use-toast"; // or components/ui/use-toast
 import { startOfMonth, endOfMonth, parseISO, format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { formatClientName } from "@/lib/clientNames";
 
 // Helper functions (could be moved to utils)
 const formatCurrency = (value: number) => {
@@ -114,7 +115,9 @@ export default function Clients() {
     });
 
     return computed.filter((client) => {
-      const matchesSearch = client.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const displayName = formatClientName(client.name);
+      const search = searchTerm.toLowerCase();
+      const matchesSearch = client.name.toLowerCase().includes(search) || displayName.toLowerCase().includes(search);
 
       let matchesStatus = true;
 
@@ -184,7 +187,7 @@ export default function Clients() {
       const projectedRevenue = remainingMonths * c.mrr;
 
       return [
-        c.name,
+        formatClientName(c.name),
         c.email || '',
         c.calculatedStatus,
         c.mrr,
@@ -213,7 +216,7 @@ export default function Clients() {
     updateClient.mutate(
       { id: client.id, status: "churned", churn_date: new Date().toISOString().split("T")[0] },
       {
-        onSuccess: () => toast({ title: "Assinatura cancelada", description: `${client.name} marcado como churned.` }),
+        onSuccess: () => toast({ title: "Assinatura cancelada", description: `${formatClientName(client.name)} marcado como churned.` }),
         onError: (err) => toast({ variant: "destructive", title: "Erro", description: err.message }),
       }
     );
@@ -223,7 +226,7 @@ export default function Clients() {
     if (!deleteTarget) return;
     deleteClient.mutate(deleteTarget.id, {
       onSuccess: () => {
-        toast({ title: "Cliente excluído", description: `${deleteTarget.name} foi removido.` });
+        toast({ title: "Cliente excluído", description: `${formatClientName(deleteTarget.name)} foi removido.` });
         setDeleteTarget(null);
       },
       onError: (err) => toast({ variant: "destructive", title: "Erro", description: err.message }),
@@ -386,7 +389,18 @@ export default function Clients() {
 
                   return (
                     <tr key={client.id}>
-                      <td className="font-medium">{client.name}</td>
+                      <td className="font-medium">
+                        <button
+                          type="button"
+                          className="text-left font-medium text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+                          onClick={() => {
+                            setDetailClient(client);
+                            setDetailOpen(true);
+                          }}
+                        >
+                          {formatClientName(client.name)}
+                        </button>
+                      </td>
                       <td className="py-3">
                         <div className="flex flex-col gap-1">
                           <span className="font-medium">
@@ -572,7 +586,7 @@ export default function Clients() {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir cliente</AlertDialogTitle>
             <AlertDialogDescription>
-              Tem certeza que deseja excluir {deleteTarget?.name}? Esta ação não pode ser desfeita.
+              Tem certeza que deseja excluir {formatClientName(deleteTarget?.name)}? Esta ação não pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
