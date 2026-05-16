@@ -14,6 +14,7 @@ import {
 import type { Client } from '@/hooks/useClients';
 import type { Invoice } from '@/hooks/useInvoices';
 import type { DateRange } from 'react-day-picker';
+import { getEffectiveMRR } from '@/hooks/useClients';
 
 export interface ComputedInvoice {
   id: string;
@@ -67,8 +68,8 @@ export function computeExpectedInvoices(clients: Client[], month: Date): Compute
 
     const status = isAfter(today, dueDate) ? 'overdue' : 'pending';
 
-    // Invoice value = MRR (monthly) × cycle duration, so yearly clients get billed R$24k not R$2k
-    const invoiceValue = client.mrr * cycleDuration;
+    // Billable amount for the cycle. Uses normalized MRR to avoid multiplying annual values twice.
+    const invoiceValue = getEffectiveMRR(client) * cycleDuration;
 
     return [{
       id: `computed-${client.id}-${format(month, 'yyyy-MM')}`,

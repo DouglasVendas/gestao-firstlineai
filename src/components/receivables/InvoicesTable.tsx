@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCurrency, formatDate } from "@/lib/formatters";
+import { formatClientName } from "@/lib/clientNames";
 import { useInvoices } from "@/hooks/useInvoices";
 import { InvoiceDetailsModal } from "@/components/modals/InvoiceDetailsModal";
 import { RegisterPaymentModal } from "@/components/modals/RegisterPaymentModal";
@@ -29,7 +30,7 @@ const statusConfig: Record<string, { label: string; variant: "default" | "second
   paid: { label: "Pago", variant: "default", className: "bg-success/10 text-success border-success/20" },
   pending: { label: "Pendente", variant: "secondary", className: "bg-warning/10 text-warning border-warning/20" },
   overdue: { label: "Atrasado", variant: "destructive", className: "bg-destructive/10 text-destructive border-destructive/20" },
-  cancelled: { label: "Cancelado", variant: "outline", className: "bg-muted text-muted-foreground" },
+  canceled: { label: "Cancelado", variant: "outline", className: "bg-muted text-muted-foreground" },
 };
 
 interface InvoicesTableProps {
@@ -108,7 +109,7 @@ export function InvoicesTable({ data }: InvoicesTableProps) {
                   <TableRow key={invoice.id}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
-                        {invoice.client?.name || "Cliente Desconhecido"}
+                        {formatClientName(invoice.client?.name)}
                         {invoice.is_computed && (
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -158,7 +159,7 @@ export function InvoicesTable({ data }: InvoicesTableProps) {
                             onClick={() =>
                               toast({
                                 title: "Cobrança enviada",
-                                description: `Cobrança enviada para ${invoice.client?.name || "cliente"}.`,
+                                description: `Cobrança enviada para ${formatClientName(invoice.client?.name)}.`,
                               })
                             }
                           >

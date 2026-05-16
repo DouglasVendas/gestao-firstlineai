@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeInvoicesInRange } from "./computeInvoices";
+import { computeExpectedInvoices, mergeInvoicesInRange } from "./computeInvoices";
 import type { Client } from "@/hooks/useClients";
 import type { Invoice } from "@/hooks/useInvoices";
 
@@ -72,5 +72,19 @@ describe("mergeInvoicesInRange", () => {
     );
 
     expect(result.map((item) => item.id)).toEqual(["real-may"]);
+  });
+
+  it("uses normalized MRR for expected invoices so annual clients are not multiplied twice", () => {
+    const result = computeExpectedInvoices([
+      client({
+        id: "annual-client",
+        mrr: 12000,
+        billing_cycle: "yearly",
+        start_date: "2026-01-10",
+      }),
+    ], new Date(2027, 0, 1));
+
+    expect(result).toHaveLength(1);
+    expect(result[0].value).toBe(12000);
   });
 });
