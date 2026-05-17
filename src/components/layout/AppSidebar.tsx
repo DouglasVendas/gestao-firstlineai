@@ -70,9 +70,9 @@ const navigation: NavGroup[] = [
     ],
   },
   {
-    title: "Operação",
+    title: "Backoffice",
     items: [
-      { title: "Backoffice", href: "/backoffice", icon: BriefcaseBusiness },
+      { title: "Painel Interno", href: "/backoffice", icon: BriefcaseBusiness },
     ],
   },
 ];
