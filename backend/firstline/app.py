@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import os
+import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from functools import wraps
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from uuid import UUID
 
 import bcrypt
@@ -146,6 +150,16 @@ class SupabaseRest:
         response.raise_for_status()
         return response.json()
 
+    def upsert(self, table: str, payload: dict[str, Any] | list[dict[str, Any]], on_conflict: str) -> list[dict[str, Any]]:
+        response = self.request(
+            'POST',
+            f'{table}?on_conflict={quote(on_conflict, safe=",")}',
+            json=payload,
+            headers={'Prefer': 'resolution=merge-duplicates,return=representation'},
+        )
+        response.raise_for_status()
+        return response.json()
+
     def authenticate_password(self, email: str, password: str) -> bool:
         if not self.anon_key:
             raise RuntimeError('SUPABASE_ANON_KEY is required for Supabase Auth login')
@@ -157,6 +171,28 @@ class SupabaseRest:
             timeout=20,
         )
         return response.ok
+
+
+class StripeClient:
+    def __init__(self) -> None:
+        self.key = os.getenv('STRIPE_SECRET_KEY') or ''
+        if not self.key:
+            raise RuntimeError('STRIPE_SECRET_KEY is required')
+
+    def request(self, method: str, path: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+        headers = {'Authorization': f'Bearer {self.key}'}
+        kwargs: dict[str, Any] = {'headers': headers, 'timeout': 20}
+        if data is not None:
+            headers['Content-Type'] = 'application/x-www-form-urlencoded'
+            kwargs['data'] = urlencode(data, doseq=True)
+        response = requests.request(method, f'https://api.stripe.com/v1{path}', **kwargs)
+        response.raise_for_status()
+        return response.json()
+
+    def retrieve_subscription(self, subscription_id: str | None) -> dict[str, Any] | None:
+        if not subscription_id:
+            return None
+        return self.request('GET', f'/subscriptions/{quote(subscription_id, safe="")}')
 
 
 class FirstlineDb:
@@ -299,6 +335,85 @@ class FirstlineDb:
                 )
             ).mappings().all()
         return rows_to_dicts(rows)
+
+    def find_company_for_purchase(self, admin_email: str | None, company_name: str | None) -> dict[str, Any] | None:
+        clauses = []
+        params: dict[str, Any] = {}
+        if admin_email:
+            params['email'] = admin_email.strip().lower()
+            clauses.append(
+                """
+                EXISTS (
+                    SELECT 1
+                    FROM public.user_company uc
+                    JOIN public.users u ON u.id = uc.user_id
+                    WHERE uc.company_id = c.id AND lower(u.email) = :email
+                )
+                """
+            )
+            clauses.append('lower(c.contact_email) = :email')
+        else:
+            params['email'] = ''
+        if company_name:
+            params['company_name'] = company_name.strip()
+            clauses.append('c.company_name ILIKE :company_name')
+        if not clauses:
+            return None
+
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    f"""
+                    WITH company_users_agg AS (
+                        SELECT uc.company_id,
+                               count(*) AS users_count,
+                               count(*) FILTER (WHERE u.status = 'ACTIVE') AS active_users_count
+                        FROM public.user_company uc
+                        JOIN public.users u ON u.id = uc.user_id
+                        GROUP BY uc.company_id
+                    ),
+                    latest_plan AS (
+                        SELECT DISTINCT ON (cs.company_id)
+                               cs.company_id,
+                               cs.subscription_id,
+                               cs.status AS subscription_status,
+                               cs.expiration_date,
+                               cs.created_at AS subscription_created_at,
+                               cs.updated_at AS subscription_updated_at
+                        FROM public.company_subscription cs
+                        WHERE cs.status = 'active'
+                        ORDER BY cs.company_id, COALESCE(cs.updated_at, cs.created_at) DESC
+                    )
+                    SELECT c.id AS firstline_company_id,
+                           c.company_name AS firstline_company_name,
+                           c.contact_email,
+                           c.created_at AS company_created_at,
+                           c.max_active_users,
+                           COALESCE(cua.users_count, 0) AS users_count,
+                           COALESCE(cua.active_users_count, 0) AS active_users_count,
+                           lp.subscription_id AS firstline_subscription_id,
+                           lp.subscription_status,
+                           lp.expiration_date,
+                           lp.subscription_created_at,
+                           lp.subscription_updated_at,
+                           s.name AS plan_name,
+                           s.price AS unit_price,
+                           s.payment_type,
+                           s.validity_days
+                    FROM public.company c
+                    LEFT JOIN company_users_agg cua ON cua.company_id = c.id
+                    LEFT JOIN latest_plan lp ON lp.company_id = c.id
+                    LEFT JOIN public.subscription s ON s.id = lp.subscription_id
+                    WHERE {' OR '.join(clauses)}
+                    ORDER BY
+                        CASE WHEN lower(c.contact_email) = :email THEN 0 ELSE 1 END,
+                        c.updated_at DESC NULLS LAST
+                    LIMIT 1
+                    """
+                ),
+                params,
+            ).mappings().first()
+        return json_safe(dict(row)) if row else None
 
     def list_users(self, page: int, page_size: int, search: str | None = None, company_id: str | None = None) -> dict[str, Any]:
         offset = max(page - 1, 0) * page_size
@@ -808,6 +923,174 @@ def create_app() -> Flask:
         summary['expected_arr'] = round(summary['expected_arr'], 2)
         return summary
 
+    def verify_stripe_signature(payload: bytes, signature_header: str | None) -> bool:
+        secret = os.getenv('STRIPE_WEBHOOK_SECRET') or ''
+        if not secret or not signature_header:
+            return False
+        parts = {}
+        for item in signature_header.split(','):
+            if '=' in item:
+                key, value = item.split('=', 1)
+                parts.setdefault(key, []).append(value)
+        try:
+            timestamp = int((parts.get('t') or [''])[0])
+        except ValueError:
+            return False
+        if abs(time.time() - timestamp) > 300:
+            return False
+        signed_payload = f'{timestamp}.'.encode('utf-8') + payload
+        expected = hmac.new(secret.encode('utf-8'), signed_payload, hashlib.sha256).hexdigest()
+        return any(hmac.compare_digest(expected, signature) for signature in parts.get('v1', []))
+
+    def stripe_custom_fields(session: dict[str, Any]) -> dict[str, str]:
+        fields = {}
+        for item in session.get('custom_fields') or []:
+            key = item.get('key')
+            if not key:
+                continue
+            value = (item.get('text') or {}).get('value') or item.get('dropdown', {}).get('value') or item.get('numeric', {}).get('value')
+            fields[key] = value
+        return fields
+
+    def subscription_payload(subscription: dict[str, Any] | None) -> dict[str, Any]:
+        if not subscription:
+            return {}
+        item = ((subscription.get('items') or {}).get('data') or [{}])[0]
+        price = item.get('price') or {}
+        recurring = price.get('recurring') or {}
+        return {
+            'stripe_subscription_id': subscription.get('id'),
+            'subscription_status': subscription.get('status'),
+            'current_period_start': datetime.fromtimestamp(subscription['current_period_start'], tz=timezone.utc).isoformat() if subscription.get('current_period_start') else None,
+            'current_period_end': datetime.fromtimestamp(subscription['current_period_end'], tz=timezone.utc).isoformat() if subscription.get('current_period_end') else None,
+            'stripe_price_id': price.get('id'),
+            'stripe_product_id': price.get('product'),
+            'billing_cycle': 'yearly' if recurring.get('interval') == 'year' else 'monthly',
+            'seat_quantity': item.get('quantity') or 1,
+            'firstline_subscription_id': (price.get('metadata') or {}).get('firstline_subscription_id'),
+            'plan_code': (price.get('metadata') or {}).get('plan_code'),
+        }
+
+    def upsert_purchase_from_checkout(session: dict[str, Any], subscription: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        custom = stripe_custom_fields(session)
+        customer_details = session.get('customer_details') or {}
+        metadata = session.get('metadata') or {}
+        sub_payload = subscription_payload(subscription)
+        admin_email = customer_details.get('email')
+        company_name = custom.get('company_name')
+        matched_company = firstline_db().find_company_for_purchase(admin_email, company_name)
+        firstline_company_id = matched_company.get('firstline_company_id') if matched_company else None
+        amount_total = session.get('amount_total')
+
+        payload = {
+            'stripe_checkout_session_id': session.get('id'),
+            'stripe_customer_id': session.get('customer'),
+            'stripe_subscription_id': session.get('subscription') or sub_payload.get('stripe_subscription_id'),
+            'stripe_payment_intent_id': session.get('payment_intent'),
+            'stripe_invoice_id': session.get('invoice'),
+            'firstline_company_id': firstline_company_id,
+            'firstline_subscription_id': sub_payload.get('firstline_subscription_id') or metadata.get('firstline_subscription_id'),
+            'plan_code': sub_payload.get('plan_code') or metadata.get('plan_code'),
+            'plan_name': (sub_payload.get('plan_code') or metadata.get('plan_code') or '').title() or None,
+            'billing_cycle': sub_payload.get('billing_cycle') or metadata.get('billing_cycle') or 'monthly',
+            'billing_model': metadata.get('billing_model') or 'per_seat',
+            'seat_quantity': sub_payload.get('seat_quantity') or 1,
+            'amount_total': round((amount_total or 0) / 100, 2),
+            'currency': (session.get('currency') or 'brl').upper(),
+            'payment_status': session.get('payment_status'),
+            'subscription_status': sub_payload.get('subscription_status'),
+            'current_period_start': sub_payload.get('current_period_start'),
+            'current_period_end': sub_payload.get('current_period_end'),
+            'company_name': company_name,
+            'admin_name': custom.get('admin_name'),
+            'admin_email': admin_email,
+            'admin_phone': customer_details.get('phone'),
+            'tax_document': custom.get('tax_document'),
+            'account_creation_status': 'linked' if firstline_company_id else 'pending',
+            'raw_checkout_session': session,
+            'raw_subscription': subscription,
+            'processed_at': datetime.now(timezone.utc).isoformat(),
+        }
+        rows = supabase().upsert('backoffice_stripe_purchases', payload, 'stripe_checkout_session_id')
+        purchase = rows[0] if rows else None
+
+        if firstline_company_id and purchase:
+            billing_payload = {
+                'firstline_company_id': firstline_company_id,
+                'firstline_subscription_id': payload.get('firstline_subscription_id'),
+                'firstline_company_name': matched_company.get('firstline_company_name') if matched_company else company_name,
+                'plan_name': payload.get('plan_name'),
+                'billing_cycle': payload.get('billing_cycle'),
+                'billing_source': 'stripe',
+                'contracted_seats': payload.get('seat_quantity') or 1,
+                'active_users_count_cached': matched_company.get('active_users_count') if matched_company else None,
+                'unit_price': round((payload.get('amount_total') or 0) / max(payload.get('seat_quantity') or 1, 1), 2),
+                'start_date': datetime.now(timezone.utc).date().isoformat(),
+                'last_billing_date': datetime.now(timezone.utc).date().isoformat(),
+                'next_billing_date': parse_date(payload.get('current_period_end')).isoformat() if parse_date(payload.get('current_period_end')) else None,
+                'billing_health': 'ok' if payload.get('payment_status') == 'paid' else 'manual_review',
+                'access_policy': 'active',
+                'stripe_customer_id': payload.get('stripe_customer_id'),
+                'stripe_subscription_id': payload.get('stripe_subscription_id'),
+                'stripe_price_id': sub_payload.get('stripe_price_id'),
+                'stripe_product_id': sub_payload.get('stripe_product_id'),
+                'stripe_last_invoice_id': payload.get('stripe_invoice_id'),
+                'stripe_last_payment_status': payload.get('payment_status'),
+                'stripe_current_period_start': payload.get('current_period_start'),
+                'stripe_current_period_end': payload.get('current_period_end'),
+                'updated_by': 'stripe_webhook',
+            }
+            supabase().upsert('backoffice_company_billing', billing_payload, 'firstline_company_id')
+            supabase().insert(
+                'backoffice_billing_events',
+                {
+                    'billing_id': None,
+                    'firstline_company_id': firstline_company_id,
+                    'event_type': 'STRIPE_CHECKOUT_COMPLETED',
+                    'event_source': 'stripe',
+                    'amount': payload.get('amount_total'),
+                    'currency': payload.get('currency') or 'BRL',
+                    'description': 'Compra Stripe vinculada automaticamente a uma empresa FirstLine existente',
+                    'after_data': payload,
+                    'created_by': 'stripe_webhook',
+                },
+            )
+        return purchase
+
+    def update_purchase_by_subscription(subscription: dict[str, Any], payment_status: str | None = None, invoice_id: str | None = None) -> None:
+        sub_payload = subscription_payload(subscription)
+        subscription_id = sub_payload.get('stripe_subscription_id')
+        if not subscription_id:
+            return
+        existing = supabase().select_one('backoffice_stripe_purchases', f'stripe_subscription_id=eq.{quote(subscription_id, safe="")}&select=*')
+        payload = {
+            'subscription_status': sub_payload.get('subscription_status'),
+            'current_period_start': sub_payload.get('current_period_start'),
+            'current_period_end': sub_payload.get('current_period_end'),
+            'stripe_invoice_id': invoice_id,
+            'payment_status': payment_status,
+            'raw_subscription': subscription,
+            'processed_at': datetime.now(timezone.utc).isoformat(),
+        }
+        if existing:
+            supabase().update_rows('backoffice_stripe_purchases', f'stripe_subscription_id=eq.{quote(subscription_id, safe="")}', payload)
+            company_id = existing.get('firstline_company_id')
+            if company_id:
+                health = 'ok' if payment_status in {'paid', None} and sub_payload.get('subscription_status') in {'active', 'trialing'} else 'payment_failed'
+                supabase().update_rows(
+                    'backoffice_company_billing',
+                    f'firstline_company_id=eq.{quote(company_id, safe="")}',
+                    {
+                        'billing_health': health,
+                        'stripe_last_invoice_id': invoice_id,
+                        'stripe_last_payment_status': payment_status,
+                        'stripe_current_period_start': sub_payload.get('current_period_start'),
+                        'stripe_current_period_end': sub_payload.get('current_period_end'),
+                        'next_billing_date': parse_date(sub_payload.get('current_period_end')).isoformat() if parse_date(sub_payload.get('current_period_end')) else None,
+                        'updated_by': 'stripe_webhook',
+                    },
+                )
+
     def public_user(row: dict[str, Any]) -> dict[str, Any]:
         return {
             'id': row.get('id'),
@@ -874,6 +1157,97 @@ def create_app() -> Flask:
             return jsonify({'success': True, 'service': 'firstline-backoffice-backend', 'database': 'connected', 'tables': auth_tables, 'firstline': firstline})
         except Exception as exc:
             return jsonify({'success': False, 'service': 'firstline-backoffice-backend', 'database': 'error', 'error': str(exc)}), 503
+
+    @app.post('/internal/stripe/webhook')
+    def stripe_webhook():
+        payload = request.get_data()
+        if not verify_stripe_signature(payload, request.headers.get('Stripe-Signature')):
+            return jsonify({'success': False, 'error': 'Assinatura Stripe inválida'}), 400
+
+        try:
+            event = json.loads(payload.decode('utf-8'))
+        except json.JSONDecodeError:
+            return jsonify({'success': False, 'error': 'Payload inválido'}), 400
+
+        event_id = event.get('id')
+        event_type = event.get('type')
+        event_object = ((event.get('data') or {}).get('object') or {})
+        object_id = event_object.get('id')
+        if not event_id or not event_type:
+            return jsonify({'success': False, 'error': 'Evento Stripe inválido'}), 400
+
+        existing = supabase().select_one('backoffice_stripe_events', f'stripe_event_id=eq.{quote(event_id, safe="")}&select=id,processing_status')
+        if existing and existing.get('processing_status') == 'processed':
+            return jsonify({'success': True, 'duplicate': True})
+
+        event_row = {
+            'stripe_event_id': event_id,
+            'event_type': event_type,
+            'stripe_object_id': object_id,
+            'processing_status': 'pending',
+            'payload': event,
+        }
+        if existing:
+            supabase().update_rows('backoffice_stripe_events', f'stripe_event_id=eq.{quote(event_id, safe="")}', event_row)
+        else:
+            supabase().insert('backoffice_stripe_events', event_row)
+
+        try:
+            stripe = StripeClient()
+            purchase = None
+            if event_type == 'checkout.session.completed':
+                subscription = stripe.retrieve_subscription(event_object.get('subscription'))
+                purchase = upsert_purchase_from_checkout(event_object, subscription)
+                company_id = purchase.get('firstline_company_id') if purchase else None
+                supabase().update_rows(
+                    'backoffice_stripe_events',
+                    f'stripe_event_id=eq.{quote(event_id, safe="")}',
+                    {
+                        'firstline_company_id': company_id,
+                        'processing_status': 'processed',
+                        'processed_at': datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            elif event_type in {'invoice.paid', 'invoice.payment_failed'}:
+                subscription_id = event_object.get('subscription')
+                if subscription_id:
+                    subscription = stripe.retrieve_subscription(subscription_id)
+                    update_purchase_by_subscription(
+                        subscription or {'id': subscription_id},
+                        payment_status='paid' if event_type == 'invoice.paid' else 'failed',
+                        invoice_id=event_object.get('id'),
+                    )
+                supabase().update_rows(
+                    'backoffice_stripe_events',
+                    f'stripe_event_id=eq.{quote(event_id, safe="")}',
+                    {'processing_status': 'processed', 'processed_at': datetime.now(timezone.utc).isoformat()},
+                )
+            elif event_type in {'customer.subscription.updated', 'customer.subscription.deleted'}:
+                update_purchase_by_subscription(event_object)
+                supabase().update_rows(
+                    'backoffice_stripe_events',
+                    f'stripe_event_id=eq.{quote(event_id, safe="")}',
+                    {'processing_status': 'processed', 'processed_at': datetime.now(timezone.utc).isoformat()},
+                )
+            else:
+                supabase().update_rows(
+                    'backoffice_stripe_events',
+                    f'stripe_event_id=eq.{quote(event_id, safe="")}',
+                    {'processing_status': 'ignored', 'processed_at': datetime.now(timezone.utc).isoformat()},
+                )
+        except Exception as exc:
+            supabase().update_rows(
+                'backoffice_stripe_events',
+                f'stripe_event_id=eq.{quote(event_id, safe="")}',
+                {
+                    'processing_status': 'failed',
+                    'error_message': str(exc),
+                    'processed_at': datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            return jsonify({'success': False, 'error': 'Falha ao processar evento Stripe'}), 500
+
+        return jsonify({'success': True})
 
     @app.post('/internal/auth/login')
     def login():
@@ -982,7 +1356,27 @@ def create_app() -> Flask:
     def billing_overview():
         candidates = firstline_db().list_billing_candidates()
         items = merge_billing_rows(candidates, billing_rows_by_company())
-        return jsonify({'success': True, 'items': items, 'summary': billing_summary(items)})
+        purchases = supabase().select_many(
+            'backoffice_stripe_purchases',
+            'select=*&order=created_at.desc&limit=100',
+        )
+        purchase_summary = {
+            'pending': sum(1 for item in purchases if item.get('account_creation_status') == 'pending'),
+            'linked': sum(1 for item in purchases if item.get('account_creation_status') == 'linked'),
+            'created': sum(1 for item in purchases if item.get('account_creation_status') == 'created'),
+            'failed': sum(1 for item in purchases if item.get('account_creation_status') == 'failed'),
+            'total': len(purchases),
+        }
+        return jsonify({'success': True, 'items': items, 'summary': billing_summary(items), 'stripe_purchases': purchases, 'stripe_purchase_summary': purchase_summary})
+
+    @app.get('/internal/billing/stripe-purchases')
+    @require_internal
+    def stripe_purchases():
+        rows = supabase().select_many(
+            'backoffice_stripe_purchases',
+            'select=*&order=created_at.desc&limit=100',
+        )
+        return jsonify({'success': True, 'items': rows})
 
     @app.post('/internal/billing/sync')
     @require_internal
