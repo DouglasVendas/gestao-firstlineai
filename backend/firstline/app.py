@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Any
+from urllib.parse import quote
 
 import bcrypt
 import jwt
@@ -21,6 +22,7 @@ class SupabaseRest:
     def __init__(self) -> None:
         self.url = (os.getenv('SUPABASE_URL') or os.getenv('VITE_SUPABASE_URL') or '').rstrip('/')
         self.key = os.getenv('SUPABASE_SERVICE_ROLE_KEY') or os.getenv('SUPABASE_SECRET_KEY') or ''
+        self.anon_key = os.getenv('SUPABASE_ANON_KEY') or os.getenv('VITE_SUPABASE_PUBLISHABLE_KEY') or ''
         if not self.url or not self.key:
             raise RuntimeError('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required')
 
@@ -53,6 +55,18 @@ class SupabaseRest:
         response.raise_for_status()
         rows = response.json()
         return rows[0] if rows else None
+
+    def authenticate_password(self, email: str, password: str) -> bool:
+        if not self.anon_key:
+            raise RuntimeError('SUPABASE_ANON_KEY is required for Supabase Auth login')
+
+        response = requests.post(
+            f'{self.url}/auth/v1/token?grant_type=password',
+            headers={'apikey': self.anon_key, 'Content-Type': 'application/json'},
+            json={'email': email, 'password': password},
+            timeout=20,
+        )
+        return response.ok
 
 
 def create_app() -> Flask:
@@ -100,7 +114,8 @@ def create_app() -> Flask:
                 return jsonify({'success': False, 'error': 'Sessão interna inválida'}), 401
             if claims.get('typ') != 'internal_backoffice':
                 return jsonify({'success': False, 'error': 'Sessão interna inválida'}), 401
-            user = supabase().select_one('internal_users', f'id=eq.{claims.get("sub")}&select=id,email,name,role,status')
+            user_id = quote(str(claims.get('sub') or ''), safe='')
+            user = supabase().select_one('internal_users', f'id=eq.{user_id}&select=id,email,name,role,status')
             if not user or user.get('status') != 'ACTIVE':
                 return jsonify({'success': False, 'error': 'Usuário interno inativo'}), 403
             g.internal_user = public_user(user)
@@ -126,10 +141,19 @@ def create_app() -> Flask:
         password = data.get('password') or ''
         if not email or not password:
             return jsonify({'success': False, 'error': 'Email e senha são obrigatórios'}), 400
-        user = supabase().select_one('internal_users', f'email=eq.{email}&select=id,email,password_hash,name,role,status')
+        db = supabase()
+        encoded_email = quote(email, safe='')
+        user = db.select_one('internal_users', f'email=eq.{encoded_email}&select=id,email,password_hash,name,role,status')
         if not user or user.get('status') != 'ACTIVE':
             return jsonify({'success': False, 'error': 'Credenciais inválidas'}), 401
-        if not bcrypt.checkpw(password.encode('utf-8'), (user.get('password_hash') or '').encode('utf-8')):
+
+        password_hash = user.get('password_hash')
+        if password_hash:
+            is_authenticated = bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+        else:
+            is_authenticated = db.authenticate_password(email, password)
+
+        if not is_authenticated:
             return jsonify({'success': False, 'error': 'Credenciais inválidas'}), 401
         response = make_response(jsonify({'success': True, 'user': public_user(user)}))
         response.set_cookie(COOKIE_NAME, create_token(user), httponly=True, secure=app.config['COOKIE_SECURE'], samesite='Lax', max_age=60 * 60 * 12, path='/')
