@@ -38,7 +38,7 @@ import { useDynamicFunnel, useLeadCaptures, useWebEvents, calculateFunnelFromDea
 import { Button } from "@/components/ui/button";
 
 // ─── URL real do projeto Supabase ─────────────────────────
-const SUPABASE_URL = "https://eeudoelnnsmavaugfhwv.supabase.co";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
 
 // ─── Canais disponíveis para filtro de funil ──────────────
 const FUNNEL_CHANNELS = [
