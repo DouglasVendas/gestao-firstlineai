@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Building2, Database, Loader2, Lock, ShieldCheck, Users } from "lucide-react";
+import { Activity, Building2, CreditCard, Database, Loader2, Lock, RefreshCw, ShieldCheck, Users } from "lucide-react";
 import { usePageTitle } from "@/contexts/PageTitleContext";
-import { backofficeApi, type AlertSummary, type AuditLogItem, type BackofficeAlert, type Company, type CompanyUserLink, type InternalUser, type Plan, type UsersSummary } from "@/lib/backofficeApi";
+import { backofficeApi, type AlertSummary, type AuditLogItem, type BackofficeAlert, type BillingCompany, type BillingSummary, type Company, type CompanyUserLink, type InternalUser, type Plan, type UsersSummary } from "@/lib/backofficeApi";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import { formatCurrency } from "@/lib/formatters";
 
 const defaultEmail = "douglasvslopes@gmail.com";
 const pageSize = 50;
-type Section = "companies" | "users" | "plans" | "monitoring";
+type Section = "companies" | "users" | "plans" | "finance" | "monitoring";
 
 function fmtDate(value?: string) {
   if (!value) return "-";
@@ -26,6 +26,30 @@ function calendarLabel(google?: boolean, microsoft?: boolean) {
   if (google) return "Google";
   if (microsoft) return "Microsoft";
   return "-";
+}
+
+function billingCycleLabel(value?: string) {
+  if (value === "monthly") return "Mensal";
+  if (value === "yearly") return "Anual";
+  if (value === "trial") return "Trial";
+  if (value === "manual") return "Manual";
+  return "-";
+}
+
+function billingHealthLabel(value?: string) {
+  const labels: Record<string, string> = {
+    ok: "OK",
+    not_configured: "Não configurado",
+    trial: "Trial",
+    trial_expiring: "Trial expirando",
+    due_soon: "Vence em breve",
+    overdue: "Atrasado",
+    payment_failed: "Falha no pagamento",
+    canceling: "Cancelando",
+    canceled: "Cancelado",
+    manual_review: "Revisar",
+  };
+  return labels[value || ""] || value || "-";
 }
 
 function EmptyState({ message }: { message: string }) {
@@ -48,6 +72,9 @@ export default function Backoffice() {
   const [usersLinks, setUsersLinks] = useState<CompanyUserLink[]>([]);
   const [usersSummary, setUsersSummary] = useState<UsersSummary | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [billingItems, setBillingItems] = useState<BillingCompany[]>([]);
+  const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
+  const [isSyncingBilling, setIsSyncingBilling] = useState(false);
   const [alerts, setAlerts] = useState<BackofficeAlert[]>([]);
   const [alertsSummary, setAlertsSummary] = useState<AlertSummary>({ high: 0, medium: 0, low: 0, total: 0 });
   const [auditLog, setAuditLog] = useState<AuditLogItem[]>([]);
@@ -80,6 +107,11 @@ export default function Backoffice() {
         const response = await backofficeApi.plans();
         setPlans(response.plans || []);
         setBackendMessage(response.message || "");
+      }
+      if (activeSection === "finance") {
+        const response = await backofficeApi.billingOverview();
+        setBillingItems(response.items || []);
+        setBillingSummary(response.summary || null);
       }
       if (activeSection === "monitoring") {
         const [alertsResponse, auditResponse] = await Promise.all([backofficeApi.alerts(), backofficeApi.auditLog(1, 20)]);
@@ -122,6 +154,21 @@ export default function Backoffice() {
   async function switchSection(next: Section) {
     setSection(next);
     if (internalUser) await loadData(next);
+  }
+
+  async function handleSyncBilling() {
+    setIsSyncingBilling(true);
+    setBackendMessage("");
+    try {
+      const response = await backofficeApi.syncBilling();
+      setBillingItems(response.items || []);
+      setBillingSummary(response.summary || null);
+      setBackendMessage(response.created ? `${response.created} previsões financeiras criadas no Supabase.` : "Todas as empresas já tinham previsão financeira.");
+    } catch (err) {
+      setBackendMessage(err instanceof Error ? err.message : "Falha ao sincronizar previsões financeiras.");
+    } finally {
+      setIsSyncingBilling(false);
+    }
   }
 
   const filteredCompanies = useMemo(() => {
@@ -168,10 +215,11 @@ export default function Backoffice() {
       </div>
 
       <Tabs value={section} onValueChange={(value) => switchSection(value as Section)}>
-        <TabsList className="grid w-full grid-cols-4 lg:w-[720px]">
+        <TabsList className="grid w-full grid-cols-5 lg:w-[900px]">
           <TabsTrigger value="companies"><Building2 className="mr-2 h-4 w-4" />Clientes</TabsTrigger>
           <TabsTrigger value="users"><Users className="mr-2 h-4 w-4" />Usuários</TabsTrigger>
           <TabsTrigger value="plans"><ShieldCheck className="mr-2 h-4 w-4" />Planos</TabsTrigger>
+          <TabsTrigger value="finance"><CreditCard className="mr-2 h-4 w-4" />Financeiro</TabsTrigger>
           <TabsTrigger value="monitoring"><Activity className="mr-2 h-4 w-4" />Monitoramento</TabsTrigger>
         </TabsList>
 
@@ -194,6 +242,64 @@ export default function Backoffice() {
 
         <TabsContent value="plans" className="space-y-4">
           <Card><CardContent className="p-0">{plans.length ? <Table><TableHeader><TableRow><TableHead>Plano</TableHead><TableHead>Tipo</TableHead><TableHead>Preço</TableHead><TableHead>Empresas</TableHead><TableHead>Status</TableHead></TableRow></TableHeader><TableBody>{plans.map((plan) => <TableRow key={plan.id}><TableCell className="font-medium">{plan.name}<p className="text-xs text-muted-foreground">{plan.description || "-"}</p></TableCell><TableCell>{plan.subscription_type || "-"} / {plan.payment_type || "-"}</TableCell><TableCell>{formatCurrency(Number(plan.price || 0))}</TableCell><TableCell>{plan.companies_count ?? 0}</TableCell><TableCell><Badge variant="outline">{plan.status}</Badge></TableCell></TableRow>)}</TableBody></Table> : <EmptyState message="Nenhum plano retornado ainda." />}</CardContent></Card>
+        </TabsContent>
+
+        <TabsContent value="finance" className="space-y-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Gestão financeira SaaS</h2>
+              <p className="text-sm text-muted-foreground">Previsão comercial no Supabase do backoffice. Pagamentos Stripe entram depois como confirmação.</p>
+            </div>
+            <Button onClick={handleSyncBilling} disabled={isSyncingBilling} variant="outline">
+              {isSyncingBilling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              Gerar previsões faltantes
+            </Button>
+          </div>
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">MRR previsto</p><p className="mt-2 font-mono text-2xl font-semibold text-primary">{formatCurrency(billingSummary?.expected_mrr || 0)}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">ARR previsto</p><p className="mt-2 font-mono text-2xl font-semibold">{formatCurrency(billingSummary?.expected_arr || 0)}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Configuradas</p><p className="mt-2 font-mono text-2xl font-semibold text-success">{billingSummary?.configured_companies ?? 0}<span className="text-sm text-muted-foreground"> / {billingSummary?.total_companies ?? 0}</span></p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Atenção</p><p className="mt-2 font-mono text-2xl font-semibold text-warning">{(billingSummary?.due_soon || 0) + (billingSummary?.overdue || 0) + (billingSummary?.manual_review || 0)}</p></CardContent></Card>
+          </div>
+          <Card>
+            <CardContent className="p-0">
+              {billingItems.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Plano</TableHead>
+                      <TableHead>Usuários</TableHead>
+                      <TableHead>Receita Prevista</TableHead>
+                      <TableHead>Próxima Cobrança</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {billingItems.map((item) => (
+                      <TableRow key={item.firstline_company_id}>
+                        <TableCell className="font-medium">
+                          {item.firstline_company_name || "-"}
+                          <p className="text-xs text-muted-foreground">{item.is_configured ? "Supabase configurado" : "Previsão ainda não salva"}</p>
+                        </TableCell>
+                        <TableCell>
+                          {item.plan_name || item.firstline_plan_name || "Sem plano"}
+                          <p className="text-xs text-muted-foreground">{billingCycleLabel(item.billing_cycle)} · {formatCurrency(Number(item.unit_price || 0))}/usuário</p>
+                        </TableCell>
+                        <TableCell>{item.contracted_seats ?? 0} contratados / {item.active_users_count ?? item.active_users_count_cached ?? 0} ativos</TableCell>
+                        <TableCell>
+                          <span className="font-mono">{formatCurrency(Number(item.expected_mrr || 0))}</span>
+                          <p className="text-xs text-muted-foreground">ARR {formatCurrency(Number(item.expected_arr || 0))}</p>
+                        </TableCell>
+                        <TableCell>{fmtDate(item.next_billing_date)}</TableCell>
+                        <TableCell><Badge variant={item.billing_health === "ok" ? "default" : "outline"}>{billingHealthLabel(item.billing_health)}</Badge></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : <EmptyState message="Nenhuma previsão financeira carregada ainda. Use a sincronização para criar a camada gerencial no Supabase." />}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="monitoring" className="space-y-4">

@@ -42,6 +42,39 @@ def rows_to_dicts(rows: Any) -> list[dict[str, Any]]:
     return [json_safe(dict(row)) for row in rows]
 
 
+def parse_date(value: Any) -> date | None:
+    if not value:
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00')).date()
+    except ValueError:
+        try:
+            return date.fromisoformat(str(value))
+        except ValueError:
+            return None
+
+
+def add_months(anchor: date, months: int) -> date:
+    month = anchor.month - 1 + months
+    year = anchor.year + month // 12
+    month = month % 12 + 1
+    last_day = [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
+    return date(year, month, min(anchor.day, last_day))
+
+
+def next_billing_date(anchor: date | None, cycle: str | None, from_date: date | None = None) -> str | None:
+    if not anchor or cycle not in {'monthly', 'yearly'}:
+        return None
+    current = from_date or date.today()
+    months = 1 if cycle == 'monthly' else 12
+    candidate = anchor
+    while candidate < current:
+        candidate = add_months(candidate, months)
+    return candidate.isoformat()
+
+
 class SupabaseRest:
     def __init__(self) -> None:
         self.url = (os.getenv('SUPABASE_URL') or os.getenv('VITE_SUPABASE_URL') or '').rstrip('/')
@@ -85,6 +118,33 @@ class SupabaseRest:
         response.raise_for_status()
         rows = response.json()
         return rows[0] if rows else None
+
+    def select_many(self, table: str, query: str) -> list[dict[str, Any]]:
+        response = self.request('GET', f'{table}?{query}')
+        if response.status_code == 404:
+            return []
+        response.raise_for_status()
+        return response.json()
+
+    def insert(self, table: str, payload: dict[str, Any] | list[dict[str, Any]]) -> list[dict[str, Any]]:
+        response = self.request(
+            'POST',
+            table,
+            json=payload,
+            headers={'Prefer': 'return=representation'},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def update_rows(self, table: str, query: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        response = self.request(
+            'PATCH',
+            f'{table}?{query}',
+            json=payload,
+            headers={'Prefer': 'return=representation'},
+        )
+        response.raise_for_status()
+        return response.json()
 
     def authenticate_password(self, email: str, password: str) -> bool:
         if not self.anon_key:
@@ -188,6 +248,57 @@ class FirstlineDb:
                 params,
             ).mappings().all()
         return {'items': rows_to_dicts(rows), 'pagination': {'page': page, 'page_size': page_size, 'total': int(total)}}
+
+    def list_billing_candidates(self) -> list[dict[str, Any]]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    WITH company_users_agg AS (
+                        SELECT uc.company_id,
+                               count(*) AS users_count,
+                               count(*) FILTER (WHERE u.status = 'ACTIVE') AS active_users_count
+                        FROM public.user_company uc
+                        JOIN public.users u ON u.id = uc.user_id
+                        GROUP BY uc.company_id
+                    ),
+                    latest_plan AS (
+                        SELECT DISTINCT ON (cs.company_id)
+                               cs.company_id,
+                               cs.subscription_id,
+                               cs.status AS subscription_status,
+                               cs.expiration_date,
+                               cs.created_at AS subscription_created_at,
+                               cs.updated_at AS subscription_updated_at
+                        FROM public.company_subscription cs
+                        WHERE cs.status = 'active'
+                        ORDER BY cs.company_id, COALESCE(cs.updated_at, cs.created_at) DESC
+                    )
+                    SELECT c.id AS firstline_company_id,
+                           c.company_name AS firstline_company_name,
+                           c.contact_email,
+                           c.created_at AS company_created_at,
+                           c.max_active_users,
+                           COALESCE(cua.users_count, 0) AS users_count,
+                           COALESCE(cua.active_users_count, 0) AS active_users_count,
+                           lp.subscription_id AS firstline_subscription_id,
+                           lp.subscription_status,
+                           lp.expiration_date,
+                           lp.subscription_created_at,
+                           lp.subscription_updated_at,
+                           s.name AS plan_name,
+                           s.price AS unit_price,
+                           s.payment_type,
+                           s.validity_days
+                    FROM public.company c
+                    LEFT JOIN company_users_agg cua ON cua.company_id = c.id
+                    LEFT JOIN latest_plan lp ON lp.company_id = c.id
+                    LEFT JOIN public.subscription s ON s.id = lp.subscription_id
+                    ORDER BY c.company_name
+                    """
+                )
+            ).mappings().all()
+        return rows_to_dicts(rows)
 
     def list_users(self, page: int, page_size: int, search: str | None = None, company_id: str | None = None) -> dict[str, Any]:
         offset = max(page - 1, 0) * page_size
@@ -598,6 +709,105 @@ def create_app() -> Flask:
             g.firstline_db = FirstlineDb()
         return g.firstline_db
 
+    def billing_rows_by_company() -> dict[str, dict[str, Any]]:
+        rows = supabase().select_many(
+            'backoffice_company_billing',
+            'select=*&order=next_billing_date.asc.nullslast',
+        )
+        return {str(row.get('firstline_company_id')): row for row in rows}
+
+    def billing_payload_from_company(company: dict[str, Any], actor_email: str | None = None) -> dict[str, Any]:
+        cycle = 'trial' if company.get('payment_type') == 'trial' else 'monthly'
+        active_users = int(company.get('active_users_count') or 0)
+        max_users = int(company.get('max_active_users') or 0)
+        contracted_seats = max(max_users, active_users, 1)
+        start = parse_date(company.get('subscription_created_at')) or parse_date(company.get('company_created_at')) or date.today()
+        unit_price = float(company.get('unit_price') or 0)
+        plan_name = company.get('plan_name') or 'Sem plano'
+        billing_health = 'trial' if cycle == 'trial' else ('ok' if company.get('firstline_subscription_id') else 'not_configured')
+        return {
+            'firstline_company_id': company.get('firstline_company_id'),
+            'firstline_subscription_id': company.get('firstline_subscription_id'),
+            'firstline_company_name': company.get('firstline_company_name'),
+            'plan_name': plan_name,
+            'billing_cycle': cycle,
+            'billing_source': 'imported',
+            'contracted_seats': contracted_seats,
+            'active_users_count_cached': active_users,
+            'unit_price': unit_price,
+            'start_date': start.isoformat(),
+            'next_billing_date': next_billing_date(start, cycle),
+            'billing_health': billing_health,
+            'access_policy': 'trial_only' if cycle == 'trial' else 'active',
+            'created_by': actor_email,
+            'updated_by': actor_email,
+        }
+
+    def merge_billing_rows(candidates: list[dict[str, Any]], billing_by_company: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+        items = []
+        for company in candidates:
+            company_id = str(company.get('firstline_company_id'))
+            row = billing_by_company.get(company_id)
+            if row:
+                item = {**row, 'is_configured': True}
+                item.setdefault('firstline_company_name', company.get('firstline_company_name'))
+                item['active_users_count'] = company.get('active_users_count') or row.get('active_users_count_cached') or 0
+                item['firstline_plan_name'] = company.get('plan_name')
+                item['firstline_unit_price'] = company.get('unit_price')
+            else:
+                derived = billing_payload_from_company(company)
+                seats = int(derived.get('contracted_seats') or 0)
+                price = float(derived.get('unit_price') or 0)
+                period_amount = seats * price
+                expected_mrr = period_amount if derived.get('billing_cycle') == 'monthly' else 0
+                expected_arr = period_amount * 12 if derived.get('billing_cycle') == 'monthly' else 0
+                item = {
+                    **derived,
+                    'id': None,
+                    'is_configured': False,
+                    'gross_period_amount': period_amount,
+                    'expected_period_amount': period_amount,
+                    'expected_mrr': expected_mrr,
+                    'expected_arr': expected_arr,
+                    'active_users_count': company.get('active_users_count') or 0,
+                    'firstline_plan_name': company.get('plan_name'),
+                    'firstline_unit_price': company.get('unit_price'),
+                }
+            items.append(json_safe(item))
+        return items
+
+    def billing_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+        today = date.today()
+        due_limit = today + timedelta(days=7)
+        summary = {
+            'total_companies': len(items),
+            'configured_companies': 0,
+            'unconfigured_companies': 0,
+            'expected_mrr': 0.0,
+            'expected_arr': 0.0,
+            'due_soon': 0,
+            'overdue': 0,
+            'manual_review': 0,
+        }
+        for item in items:
+            if item.get('is_configured'):
+                summary['configured_companies'] += 1
+            else:
+                summary['unconfigured_companies'] += 1
+            summary['expected_mrr'] += float(item.get('expected_mrr') or 0)
+            summary['expected_arr'] += float(item.get('expected_arr') or 0)
+            if item.get('billing_health') == 'manual_review':
+                summary['manual_review'] += 1
+            due = parse_date(item.get('next_billing_date'))
+            if due:
+                if due < today:
+                    summary['overdue'] += 1
+                elif due <= due_limit:
+                    summary['due_soon'] += 1
+        summary['expected_mrr'] = round(summary['expected_mrr'], 2)
+        summary['expected_arr'] = round(summary['expected_arr'], 2)
+        return summary
+
     def public_user(row: dict[str, Any]) -> dict[str, Any]:
         return {
             'id': row.get('id'),
@@ -766,6 +976,99 @@ def create_app() -> Flask:
     @require_internal
     def plans():
         return jsonify({'success': True, 'plans': firstline_db().list_plans()})
+
+    @app.get('/internal/billing/overview')
+    @require_internal
+    def billing_overview():
+        candidates = firstline_db().list_billing_candidates()
+        items = merge_billing_rows(candidates, billing_rows_by_company())
+        return jsonify({'success': True, 'items': items, 'summary': billing_summary(items)})
+
+    @app.post('/internal/billing/sync')
+    @require_internal
+    def sync_billing():
+        candidates = firstline_db().list_billing_candidates()
+        existing = billing_rows_by_company()
+        payload = [
+            billing_payload_from_company(company, g.internal_user.get('email'))
+            for company in candidates
+            if str(company.get('firstline_company_id')) not in existing
+        ]
+        created = supabase().insert('backoffice_company_billing', payload) if payload else []
+        if created:
+            supabase().insert(
+                'backoffice_billing_events',
+                [
+                    {
+                        'billing_id': row.get('id'),
+                        'firstline_company_id': row.get('firstline_company_id'),
+                        'event_type': 'BILLING_FORECAST_CREATED',
+                        'event_source': 'system',
+                        'description': 'Previsão financeira criada a partir do plano ativo da FirstLine',
+                        'after_data': row,
+                        'created_by': g.internal_user.get('email'),
+                    }
+                    for row in created
+                ],
+            )
+        items = merge_billing_rows(candidates, billing_rows_by_company())
+        return jsonify({'success': True, 'created': len(created), 'items': items, 'summary': billing_summary(items)})
+
+    @app.patch('/internal/billing/companies/<string:company_id>')
+    @require_internal
+    def update_billing_company(company_id: str):
+        allowed_fields = {
+            'plan_name',
+            'billing_cycle',
+            'contracted_seats',
+            'unit_price',
+            'discount_type',
+            'discount_value',
+            'discount_reason',
+            'discount_expires_at',
+            'start_date',
+            'last_billing_date',
+            'next_billing_date',
+            'billing_health',
+            'access_policy',
+            'notes',
+            'stripe_customer_id',
+            'stripe_subscription_id',
+            'stripe_price_id',
+            'stripe_product_id',
+        }
+        data = request.get_json(silent=True) or {}
+        payload = {key: value for key, value in data.items() if key in allowed_fields}
+        if not payload:
+            return jsonify({'success': False, 'error': 'Nenhum campo permitido informado'}), 400
+        payload['updated_by'] = g.internal_user.get('email')
+
+        encoded_company_id = quote(company_id, safe='')
+        before = supabase().select_one('backoffice_company_billing', f'firstline_company_id=eq.{encoded_company_id}&select=*')
+        if not before:
+            company = next((item for item in firstline_db().list_billing_candidates() if str(item.get('firstline_company_id')) == company_id), None)
+            if not company:
+                return jsonify({'success': False, 'error': 'Empresa não encontrada'}), 404
+            created_payload = {**billing_payload_from_company(company, g.internal_user.get('email')), **payload}
+            rows = supabase().insert('backoffice_company_billing', created_payload)
+        else:
+            rows = supabase().update_rows('backoffice_company_billing', f'firstline_company_id=eq.{encoded_company_id}', payload)
+
+        billing = rows[0] if rows else None
+        supabase().insert(
+            'backoffice_billing_events',
+            {
+                'billing_id': billing.get('id') if billing else None,
+                'firstline_company_id': company_id,
+                'event_type': 'BILLING_FORECAST_UPDATED',
+                'event_source': 'manual',
+                'description': data.get('reason') or 'Ajuste manual de previsão financeira',
+                'before_data': before,
+                'after_data': billing,
+                'created_by': g.internal_user.get('email'),
+            },
+        )
+        return jsonify({'success': True, 'billing': billing})
 
     @app.get('/internal/alerts')
     @require_internal

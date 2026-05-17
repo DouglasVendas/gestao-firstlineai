@@ -47,6 +47,20 @@ export const backofficeApi = {
   plans() {
     return request<{ success: boolean; plans: Plan[]; message?: string }>('/internal/plans');
   },
+  billingOverview() {
+    return request<{ success: boolean; items: BillingCompany[]; summary: BillingSummary }>('/internal/billing/overview');
+  },
+  syncBilling() {
+    return request<{ success: boolean; created: number; items: BillingCompany[]; summary: BillingSummary }>('/internal/billing/sync', {
+      method: 'POST',
+    });
+  },
+  updateBilling(companyId: string, payload: Partial<BillingCompany> & { reason?: string }) {
+    return request<{ success: boolean; billing: BillingCompany }>(`/internal/billing/companies/${companyId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
   alerts() {
     return request<{ success: boolean; items: BackofficeAlert[]; summary: AlertSummary; by_code: Record<string, number> }>(
       '/internal/alerts',
@@ -118,6 +132,52 @@ export type Plan = {
   price?: number;
   status: string;
   companies_count?: number;
+};
+
+export type BillingSummary = {
+  total_companies: number;
+  configured_companies: number;
+  unconfigured_companies: number;
+  expected_mrr: number;
+  expected_arr: number;
+  due_soon: number;
+  overdue: number;
+  manual_review: number;
+};
+
+export type BillingCompany = {
+  id?: string | null;
+  firstline_company_id: string;
+  firstline_subscription_id?: string;
+  firstline_company_name?: string;
+  plan_name?: string;
+  billing_cycle?: 'monthly' | 'yearly' | 'trial' | 'manual' | 'none';
+  billing_source?: 'manual' | 'stripe' | 'imported';
+  contracted_seats?: number;
+  active_users_count?: number;
+  active_users_count_cached?: number;
+  unit_price?: number;
+  discount_type?: 'none' | 'percent' | 'fixed_amount' | 'custom';
+  discount_value?: number;
+  discount_reason?: string;
+  discount_expires_at?: string;
+  gross_period_amount?: number;
+  expected_period_amount?: number;
+  expected_mrr?: number;
+  expected_arr?: number;
+  start_date?: string;
+  last_billing_date?: string;
+  next_billing_date?: string;
+  billing_health?: string;
+  access_policy?: string;
+  stripe_customer_id?: string;
+  stripe_subscription_id?: string;
+  stripe_price_id?: string;
+  stripe_product_id?: string;
+  notes?: string;
+  is_configured?: boolean;
+  firstline_plan_name?: string;
+  firstline_unit_price?: number;
 };
 
 export type AlertSummary = {
