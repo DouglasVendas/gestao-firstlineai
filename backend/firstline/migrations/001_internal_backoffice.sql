@@ -31,8 +31,8 @@ CREATE TABLE IF NOT EXISTS public.backoffice_audit_log (
 CREATE INDEX IF NOT EXISTS idx_internal_users_email ON public.internal_users (lower(email));
 CREATE INDEX IF NOT EXISTS idx_backoffice_audit_log_created_at ON public.backoffice_audit_log (created_at DESC);
 
-ALTER TABLE public.internal_users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.backoffice_audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.internal_users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.backoffice_audit_log DISABLE ROW LEVEL SECURITY;
 
 DO $$
 BEGIN
