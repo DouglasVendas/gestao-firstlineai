@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from flask import Flask, g, jsonify, make_response, request
 from flask_cors import CORS
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 COOKIE_NAME = 'firstline_internal_session'
 
