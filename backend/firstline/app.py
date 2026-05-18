@@ -4,12 +4,13 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from functools import wraps
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 from uuid import UUID
 
 import bcrypt
@@ -1137,6 +1138,255 @@ def create_app() -> Flask:
         summary['expected_arr'] = round(summary['expected_arr'], 2)
         return summary
 
+    def growth_overview() -> dict[str, Any]:
+        def as_float(value: Any) -> float:
+            if value is None:
+                return 0.0
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def is_referral_text(value: Any) -> bool:
+            text_value = str(value or '').lower()
+            if not text_value:
+                return False
+            keywords = ['indic', 'referr', 'parceir', 'afiliad']
+            return any(keyword in text_value for keyword in keywords)
+
+        def referrer_from_text(value: Any) -> str | None:
+            text_value = str(value or '')
+            if not text_value:
+                return None
+            patterns = [
+                r'(?:indica(?:ç|c)[aã]o\s+(?:do|de)\s+)([A-Za-zÀ-ÿ0-9 _\.-]{2,80})',
+                r'(?:indicado\s+por\s+)([A-Za-zÀ-ÿ0-9 _\.-]{2,80})',
+                r'(?:referral\s+(?:from|by)\s+)([A-Za-zÀ-ÿ0-9 _\.-]{2,80})',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text_value, flags=re.IGNORECASE)
+                if match:
+                    name = re.sub(r'\s+', ' ', (match.group(1) or '').strip(" .,:;-"))
+                    if len(name) >= 2:
+                        return name
+            return None
+
+        def referrer_domain(value: Any) -> str | None:
+            text_value = str(value or '').strip()
+            if not text_value:
+                return None
+            url_value = text_value if text_value.startswith(('http://', 'https://')) else f'https://{text_value}'
+            try:
+                hostname = urlparse(url_value).hostname or ''
+            except Exception:
+                return None
+            hostname = hostname.lower()
+            if hostname.startswith('www.'):
+                hostname = hostname[4:]
+            return hostname or None
+
+        deals = supabase().select_many(
+            'deals',
+            'select=id,title,company,contact_name,contact_email,value,stage,source,notes,lost_reason,utm_source,utm_medium,utm_campaign,created_at,updated_at&order=created_at.desc&limit=1200',
+        )
+        lead_captures = supabase().select_many(
+            'lead_captures',
+            'select=id,name,email,company,form_source,page_url,utm_source,utm_medium,utm_campaign,referrer,status,deal_id,converted_at,created_at&order=created_at.desc&limit=1200',
+        )
+        purchases = supabase().select_many(
+            'backoffice_stripe_purchases',
+            'select=id,firstline_company_id,company_name,admin_name,admin_email,plan_name,billing_cycle,seat_quantity,amount_total,currency,payment_status,subscription_status,account_creation_status,account_creation_error,created_at,processed_at&order=created_at.desc&limit=1200',
+        )
+
+        lead_by_deal: dict[str, dict[str, Any]] = {}
+        for lead in lead_captures:
+            deal_id = str(lead.get('deal_id') or '')
+            if not deal_id:
+                continue
+            lead_by_deal[deal_id] = lead
+
+        referral_items: list[dict[str, Any]] = []
+        for deal in deals:
+            stage = str(deal.get('stage') or '').lower()
+            source = deal.get('source')
+            notes = deal.get('notes')
+            utm_source = deal.get('utm_source')
+            utm_medium = deal.get('utm_medium')
+            utm_campaign = deal.get('utm_campaign')
+            deal_id = str(deal.get('id') or '')
+            lead = lead_by_deal.get(deal_id)
+
+            referral_flag = (
+                is_referral_text(source)
+                or is_referral_text(notes)
+                or is_referral_text(utm_source)
+                or is_referral_text(utm_medium)
+                or (lead and (
+                    is_referral_text(lead.get('utm_source'))
+                    or is_referral_text(lead.get('utm_medium'))
+                    or is_referral_text(lead.get('form_source'))
+                    or is_referral_text(lead.get('referrer'))
+                ))
+            )
+            if not referral_flag:
+                continue
+
+            referrer_name = (
+                referrer_from_text(notes)
+                or referrer_from_text(source)
+                or referrer_from_text(lead.get('referrer') if lead else None)
+                or referrer_domain(lead.get('referrer') if lead else None)
+                or 'Não identificado'
+            )
+            origin = (
+                (lead.get('utm_source') if lead else None)
+                or (lead.get('form_source') if lead else None)
+                or utm_source
+                or source
+                or 'indicação'
+            )
+
+            value = as_float(deal.get('value'))
+            is_converted = stage == 'closed_won'
+
+            referral_items.append(
+                json_safe(
+                    {
+                        'id': deal_id,
+                        'referrer_name': referrer_name,
+                        'origin': origin,
+                        'referred_company': deal.get('company'),
+                        'referred_contact': deal.get('contact_name') or deal.get('contact_email') or lead.get('email') if lead else None,
+                        'stage': stage or 'lead',
+                        'value': value,
+                        'is_converted': is_converted,
+                        'lost_reason': deal.get('lost_reason'),
+                        'created_at': deal.get('created_at'),
+                        'updated_at': deal.get('updated_at'),
+                    }
+                )
+            )
+
+        referral_items.sort(key=lambda item: item.get('created_at') or '', reverse=True)
+
+        total_referrals = len(referral_items)
+        converted_referrals = sum(1 for item in referral_items if item.get('is_converted'))
+        referral_pipeline_value = round(sum(as_float(item.get('value')) for item in referral_items if str(item.get('stage')) not in {'closed_won', 'closed_lost'}), 2)
+        referral_revenue = round(sum(as_float(item.get('value')) for item in referral_items if item.get('is_converted')), 2)
+        referral_conversion = round((converted_referrals / total_referrals * 100) if total_referrals else 0, 1)
+
+        referrer_rank_raw: dict[str, dict[str, Any]] = {}
+        for item in referral_items:
+            name = str(item.get('referrer_name') or 'Não identificado')
+            row = referrer_rank_raw.setdefault(name, {'referrer_name': name, 'indications': 0, 'conversions': 0, 'revenue': 0.0})
+            row['indications'] += 1
+            if item.get('is_converted'):
+                row['conversions'] += 1
+                row['revenue'] = round(row['revenue'] + as_float(item.get('value')), 2)
+        referrer_rank = sorted(referrer_rank_raw.values(), key=lambda row: (row.get('revenue', 0), row.get('conversions', 0), row.get('indications', 0)), reverse=True)[:20]
+        for row in referrer_rank:
+            indications = int(row.get('indications') or 0)
+            conversions = int(row.get('conversions') or 0)
+            row['conversion_rate'] = round((conversions / indications * 100) if indications else 0, 1)
+
+        monthly_plg_raw: dict[str, dict[str, Any]] = {}
+        paid_purchases = 0
+        linked_purchases = 0
+        failed_purchases = 0
+        pending_purchases = 0
+        active_subscriptions = 0
+        plg_revenue = 0.0
+        plg_items: list[dict[str, Any]] = []
+
+        for purchase in purchases:
+            status = str(purchase.get('account_creation_status') or 'pending').lower()
+            payment_status = str(purchase.get('payment_status') or '').lower()
+            subscription_status = str(purchase.get('subscription_status') or '').lower()
+            created_at = purchase.get('created_at')
+            amount = as_float(purchase.get('amount_total'))
+
+            if payment_status == 'paid':
+                paid_purchases += 1
+                plg_revenue += amount
+            if status in {'linked', 'created'}:
+                linked_purchases += 1
+            elif status == 'failed':
+                failed_purchases += 1
+            else:
+                pending_purchases += 1
+            if subscription_status in {'active', 'trialing'}:
+                active_subscriptions += 1
+
+            month_key = '-'
+            parsed_date = parse_date(created_at)
+            if parsed_date:
+                month_key = parsed_date.strftime('%Y-%m')
+            month_row = monthly_plg_raw.setdefault(month_key, {'month': month_key, 'purchases': 0, 'paid': 0, 'linked': 0, 'revenue': 0.0})
+            month_row['purchases'] += 1
+            if payment_status == 'paid':
+                month_row['paid'] += 1
+                month_row['revenue'] = round(month_row['revenue'] + amount, 2)
+            if status in {'linked', 'created'}:
+                month_row['linked'] += 1
+
+            plg_items.append(
+                json_safe(
+                    {
+                        'id': purchase.get('id'),
+                        'created_at': created_at,
+                        'company_name': purchase.get('company_name'),
+                        'admin_name': purchase.get('admin_name'),
+                        'admin_email': purchase.get('admin_email'),
+                        'plan_name': purchase.get('plan_name'),
+                        'billing_cycle': purchase.get('billing_cycle'),
+                        'seat_quantity': purchase.get('seat_quantity'),
+                        'amount_total': amount,
+                        'currency': purchase.get('currency') or 'BRL',
+                        'payment_status': purchase.get('payment_status'),
+                        'subscription_status': purchase.get('subscription_status'),
+                        'account_creation_status': purchase.get('account_creation_status'),
+                        'account_creation_error': purchase.get('account_creation_error'),
+                        'firstline_company_id': purchase.get('firstline_company_id'),
+                    }
+                )
+            )
+
+        total_plg = len(plg_items)
+        plg_paid_rate = round((paid_purchases / total_plg * 100) if total_plg else 0, 1)
+        plg_link_rate = round((linked_purchases / total_plg * 100) if total_plg else 0, 1)
+        plg_revenue = round(plg_revenue, 2)
+        monthly_plg = sorted(monthly_plg_raw.values(), key=lambda row: row['month'], reverse=True)[:12]
+
+        return {
+            'referral': {
+                'summary': {
+                    'total_indications': total_referrals,
+                    'converted_customers': converted_referrals,
+                    'conversion_rate': referral_conversion,
+                    'pipeline_value': referral_pipeline_value,
+                    'revenue_won': referral_revenue,
+                    'top_referrers_count': len(referrer_rank),
+                },
+                'referrers': referrer_rank,
+                'items': referral_items[:300],
+            },
+            'plg': {
+                'summary': {
+                    'total_purchases': total_plg,
+                    'paid_purchases': paid_purchases,
+                    'linked_or_created_accounts': linked_purchases,
+                    'pending_accounts': pending_purchases,
+                    'failed_accounts': failed_purchases,
+                    'active_subscriptions': active_subscriptions,
+                    'paid_conversion_rate': plg_paid_rate,
+                    'account_link_rate': plg_link_rate,
+                    'revenue_total': plg_revenue,
+                },
+                'monthly': monthly_plg,
+                'items': plg_items[:300],
+            },
+        }
+
     def verify_stripe_signature(payload: bytes, signature_header: str | None) -> bool:
         secret = os.getenv('STRIPE_WEBHOOK_SECRET') or ''
         if not secret or not signature_header:
@@ -1972,6 +2222,11 @@ def create_app() -> Flask:
         page = max(int(request.args.get('page', 1)), 1)
         page_size = min(max(int(request.args.get('page_size', 20)), 1), 100)
         return jsonify({'success': True, **firstline_db().list_audit_log(page, page_size)})
+
+    @app.get('/internal/growth/overview')
+    @require_internal
+    def growth_overview_route():
+        return jsonify({'success': True, **growth_overview()})
 
     return app
 

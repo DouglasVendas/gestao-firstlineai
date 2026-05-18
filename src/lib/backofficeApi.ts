@@ -120,6 +120,11 @@ export const backofficeApi = {
       '/internal/alerts',
     );
   },
+  growthOverview() {
+    return request<{ success: boolean; referral: GrowthReferralOverview; plg: GrowthPlgOverview }>(
+      '/internal/growth/overview',
+    );
+  },
   auditLog(page = 1, pageSize = 20) {
     return request<{ success: boolean; items: AuditLogItem[]; pagination: Pagination }>(
       `/internal/audit-log?page=${page}&page_size=${pageSize}`,
@@ -398,4 +403,79 @@ export type AuditLogItem = {
   entity_id?: string;
   reason?: string;
   created_at?: string;
+};
+
+export type GrowthReferralItem = {
+  id: string;
+  referrer_name?: string;
+  origin?: string;
+  referred_company?: string;
+  referred_contact?: string;
+  stage?: string;
+  value?: number;
+  is_converted?: boolean;
+  lost_reason?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type GrowthReferralReferrer = {
+  referrer_name: string;
+  indications: number;
+  conversions: number;
+  conversion_rate: number;
+  revenue: number;
+};
+
+export type GrowthReferralOverview = {
+  summary: {
+    total_indications: number;
+    converted_customers: number;
+    conversion_rate: number;
+    pipeline_value: number;
+    revenue_won: number;
+    top_referrers_count: number;
+  };
+  referrers: GrowthReferralReferrer[];
+  items: GrowthReferralItem[];
+};
+
+export type GrowthPlgItem = {
+  id: string;
+  created_at?: string;
+  company_name?: string;
+  admin_name?: string;
+  admin_email?: string;
+  plan_name?: string;
+  billing_cycle?: string;
+  seat_quantity?: number;
+  amount_total?: number;
+  currency?: string;
+  payment_status?: string;
+  subscription_status?: string;
+  account_creation_status?: string;
+  account_creation_error?: string;
+  firstline_company_id?: string;
+};
+
+export type GrowthPlgOverview = {
+  summary: {
+    total_purchases: number;
+    paid_purchases: number;
+    linked_or_created_accounts: number;
+    pending_accounts: number;
+    failed_accounts: number;
+    active_subscriptions: number;
+    paid_conversion_rate: number;
+    account_link_rate: number;
+    revenue_total: number;
+  };
+  monthly: Array<{
+    month: string;
+    purchases: number;
+    paid: number;
+    linked: number;
+    revenue: number;
+  }>;
+  items: GrowthPlgItem[];
 };

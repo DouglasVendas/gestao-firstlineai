@@ -25,6 +25,8 @@ import {
   type BillingSummary,
   type Company,
   type CompanyDetail,
+  type GrowthPlgOverview,
+  type GrowthReferralOverview,
   type InternalUser,
   type Plan,
   type StripeEvent,
@@ -43,7 +45,7 @@ import { useToast } from "@/hooks/use-toast";
 
 const defaultEmail = "douglasvslopes@gmail.com";
 const pageSize = 100;
-type Section = "companies" | "plans" | "finance" | "monitoring";
+type Section = "companies" | "plans" | "finance" | "monitoring" | "growth";
 type SavedView =
   | "all"
   | "risk"
@@ -127,6 +129,18 @@ function alertSourceLabel(value?: string) {
   if (value === "billing") return "Billing";
   if (value === "stripe") return "Stripe";
   return value || "-";
+}
+
+function dealStageLabel(value?: string) {
+  const labels: Record<string, string> = {
+    lead: "Lead",
+    qualified: "Qualificado",
+    proposal: "Proposta",
+    negotiation: "Negociação",
+    closed_won: "Ganho",
+    closed_lost: "Perdido",
+  };
+  return labels[(value || "").toLowerCase()] || value || "-";
 }
 
 function planCatalogCategory(value?: string) {
@@ -247,6 +261,12 @@ export default function Backoffice() {
   const [monitorSourceFilter, setMonitorSourceFilter] = useState("all");
   const [monitorCodeFilter, setMonitorCodeFilter] = useState("all");
   const [monitorSavedView, setMonitorSavedView] = useState<"all" | "critical" | "billing" | "stripe" | "limits">("all");
+  const [growthReferral, setGrowthReferral] = useState<GrowthReferralOverview | null>(null);
+  const [growthPlg, setGrowthPlg] = useState<GrowthPlgOverview | null>(null);
+  const [referralSearch, setReferralSearch] = useState("");
+  const [referralStageFilter, setReferralStageFilter] = useState("all");
+  const [plgStatusFilter, setPlgStatusFilter] = useState("all");
+  const [plgPaymentFilter, setPlgPaymentFilter] = useState("all");
   const [auditLog, setAuditLog] = useState<AuditLogItem[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [backendMessage, setBackendMessage] = useState("");
@@ -317,6 +337,11 @@ export default function Backoffice() {
         setAlertsSummary(alertsResponse.summary || { high: 0, medium: 0, low: 0, total: 0 });
         setAuditLog(auditResponse.items || []);
         if (companiesRows.length) setCompanies(companiesRows);
+      }
+      if (activeSection === "growth") {
+        const response = await backofficeApi.growthOverview();
+        setGrowthReferral(response.referral || null);
+        setGrowthPlg(response.plg || null);
       }
     } finally {
       setIsLoadingData(false);
@@ -958,6 +983,83 @@ export default function Backoffice() {
     void handleOpenCompany({ id: alert.company_id, name: alert.company_name });
   }
 
+  const referralStageOptions = useMemo(
+    () => Array.from(new Set((growthReferral?.items || []).map((item) => item.stage || "").filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [growthReferral],
+  );
+
+  const filteredReferralItems = useMemo(() => {
+    const term = referralSearch.trim().toLowerCase();
+    return (growthReferral?.items || []).filter((item) => {
+      const matchesSearch =
+        !term ||
+        [item.referrer_name, item.referred_company, item.referred_contact, item.origin]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      const matchesStage = referralStageFilter === "all" || (item.stage || "").toLowerCase() === referralStageFilter;
+      return matchesSearch && matchesStage;
+    });
+  }, [growthReferral, referralSearch, referralStageFilter]);
+
+  const referralFilteredSummary = useMemo(() => {
+    const total = filteredReferralItems.length;
+    const converted = filteredReferralItems.filter((item) => item.is_converted).length;
+    const revenue = filteredReferralItems.reduce((sum, item) => sum + Number(item.is_converted ? item.value || 0 : 0), 0);
+    const pipeline = filteredReferralItems.reduce((sum, item) => {
+      const stage = (item.stage || "").toLowerCase();
+      if (stage === "closed_won" || stage === "closed_lost") return sum;
+      return sum + Number(item.value || 0);
+    }, 0);
+    return {
+      total,
+      converted,
+      conversionRate: total ? Number(((converted / total) * 100).toFixed(1)) : 0,
+      revenue,
+      pipeline,
+    };
+  }, [filteredReferralItems]);
+
+  const referralOriginRanking = useMemo(() => {
+    const ranking = filteredReferralItems.reduce((acc, item) => {
+      const key = item.referrer_name || "Não identificado";
+      const current = acc.get(key) || { referrer_name: key, indications: 0, conversions: 0, revenue: 0 };
+      current.indications += 1;
+      if (item.is_converted) {
+        current.conversions += 1;
+        current.revenue += Number(item.value || 0);
+      }
+      acc.set(key, current);
+      return acc;
+    }, new Map<string, { referrer_name: string; indications: number; conversions: number; revenue: number }>());
+    return Array.from(ranking.values()).sort((a, b) => b.revenue - a.revenue || b.conversions - a.conversions || b.indications - a.indications).slice(0, 8);
+  }, [filteredReferralItems]);
+
+  const filteredPlgItems = useMemo(() => {
+    return (growthPlg?.items || []).filter((item) => {
+      const creationStatus = (item.account_creation_status || "").toLowerCase();
+      const paymentStatus = (item.payment_status || "").toLowerCase();
+      const matchesCreation = plgStatusFilter === "all" || creationStatus === plgStatusFilter;
+      const matchesPayment = plgPaymentFilter === "all" || paymentStatus === plgPaymentFilter;
+      return matchesCreation && matchesPayment;
+    });
+  }, [growthPlg, plgStatusFilter, plgPaymentFilter]);
+
+  const plgFilteredSummary = useMemo(() => {
+    const total = filteredPlgItems.length;
+    const paid = filteredPlgItems.filter((item) => (item.payment_status || "").toLowerCase() === "paid").length;
+    const linked = filteredPlgItems.filter((item) => ["linked", "created"].includes((item.account_creation_status || "").toLowerCase())).length;
+    const revenue = filteredPlgItems.reduce((sum, item) => sum + Number(item.amount_total || 0), 0);
+    return {
+      total,
+      paid,
+      linked,
+      paidRate: total ? Number(((paid / total) * 100).toFixed(1)) : 0,
+      linkRate: total ? Number(((linked / total) * 100).toFixed(1)) : 0,
+      revenue,
+    };
+  }, [filteredPlgItems]);
+
   if (isCheckingSession) {
     return <div className="flex h-[360px] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
@@ -994,11 +1096,12 @@ export default function Backoffice() {
       </div>
 
       <Tabs value={section} onValueChange={(value) => switchSection(value as Section)}>
-        <TabsList className="grid w-full grid-cols-4 lg:w-[760px]">
+        <TabsList className="grid w-full grid-cols-5 lg:w-[980px]">
           <TabsTrigger value="companies"><Building2 className="mr-2 h-4 w-4" />Clientes</TabsTrigger>
           <TabsTrigger value="plans"><ShieldCheck className="mr-2 h-4 w-4" />Planos</TabsTrigger>
           <TabsTrigger value="finance"><CreditCard className="mr-2 h-4 w-4" />Financeiro</TabsTrigger>
           <TabsTrigger value="monitoring"><Activity className="mr-2 h-4 w-4" />Monitoramento</TabsTrigger>
+          <TabsTrigger value="growth"><TrendingUp className="mr-2 h-4 w-4" />Growth</TabsTrigger>
         </TabsList>
 
         {backendMessage && <div className="mt-4 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-muted-foreground">{backendMessage}</div>}
@@ -1414,6 +1517,163 @@ export default function Backoffice() {
               )) : <EmptyState message="Nenhum evento de auditoria ainda." />}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="growth" className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">Canal de Indicação e PLG</h2>
+            <p className="text-sm text-muted-foreground">Acompanhe quem indica, quem converte e como o funil de compra direta está performando.</p>
+          </div>
+
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold">Indicação</h3>
+              <Badge variant="outline">{growthReferral?.summary.total_indications ?? 0} indicações totais</Badge>
+            </div>
+            <div className="grid gap-4 md:grid-cols-5">
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Indicações (filtro)</p><p className="mt-2 font-mono text-2xl font-semibold">{referralFilteredSummary.total}</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Convertidos</p><p className="mt-2 font-mono text-2xl font-semibold text-success">{referralFilteredSummary.converted}</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Taxa conversão</p><p className="mt-2 font-mono text-2xl font-semibold">{referralFilteredSummary.conversionRate}%</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Pipeline</p><p className="mt-2 font-mono text-2xl font-semibold">{formatCurrency(referralFilteredSummary.pipeline)}</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Receita ganha</p><p className="mt-2 font-mono text-2xl font-semibold text-primary">{formatCurrency(referralFilteredSummary.revenue)}</p></CardContent></Card>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-2">
+              <Input
+                placeholder="Buscar por indicador, empresa indicada, contato ou origem"
+                value={referralSearch}
+                onChange={(event) => setReferralSearch(event.target.value)}
+              />
+              <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={referralStageFilter} onChange={(event) => setReferralStageFilter(event.target.value)}>
+                <option value="all">Estágio</option>
+                {referralStageOptions.map((stage) => <option key={stage} value={stage}>{dealStageLabel(stage)}</option>)}
+              </select>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-3">
+              <Card className="lg:col-span-2">
+                <CardHeader><CardTitle>Clientes indicados</CardTitle></CardHeader>
+                <CardContent className="p-0">
+                  {filteredReferralItems.length ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Quem indicou</TableHead>
+                          <TableHead>Cliente indicado</TableHead>
+                          <TableHead>Origem</TableHead>
+                          <TableHead>Estágio</TableHead>
+                          <TableHead>Valor</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredReferralItems.slice(0, 120).map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell className="font-medium">{item.referrer_name || "Não identificado"}</TableCell>
+                            <TableCell>
+                              {item.referred_company || "-"}
+                              <p className="text-xs text-muted-foreground">{item.referred_contact || "-"}</p>
+                            </TableCell>
+                            <TableCell>{item.origin || "-"}</TableCell>
+                            <TableCell><Badge variant={item.is_converted ? "default" : "outline"}>{dealStageLabel(item.stage)}</Badge></TableCell>
+                            <TableCell className="font-mono">{formatCurrency(Number(item.value || 0))}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : <EmptyState message="Nenhum indicado encontrado com os filtros atuais." />}
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>Top originadores</CardTitle></CardHeader>
+                <CardContent className="space-y-2">
+                  {referralOriginRanking.length ? referralOriginRanking.map((item) => (
+                    <div key={item.referrer_name} className="rounded-md border border-border px-3 py-2">
+                      <p className="font-medium">{item.referrer_name}</p>
+                      <p className="text-xs text-muted-foreground">{item.indications} indicações · {item.conversions} conversões</p>
+                      <p className="font-mono text-xs">{formatCurrency(item.revenue)}</p>
+                    </div>
+                  )) : <EmptyState message="Sem ranking para os filtros atuais." />}
+                </CardContent>
+              </Card>
+            </div>
+          </section>
+
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold">PLG</h3>
+              <Badge variant="outline">{growthPlg?.summary.total_purchases ?? 0} compras totais</Badge>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-5">
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Compras (filtro)</p><p className="mt-2 font-mono text-2xl font-semibold">{plgFilteredSummary.total}</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Pagas</p><p className="mt-2 font-mono text-2xl font-semibold text-success">{plgFilteredSummary.paid}</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Conta vinculada</p><p className="mt-2 font-mono text-2xl font-semibold">{plgFilteredSummary.linked}</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Taxa de link</p><p className="mt-2 font-mono text-2xl font-semibold">{plgFilteredSummary.linkRate}%</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Receita</p><p className="mt-2 font-mono text-2xl font-semibold text-primary">{formatCurrency(plgFilteredSummary.revenue)}</p></CardContent></Card>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-2">
+              <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={plgStatusFilter} onChange={(event) => setPlgStatusFilter(event.target.value)}>
+                <option value="all">Status de criação de conta</option>
+                <option value="linked">Linked</option>
+                <option value="created">Created</option>
+                <option value="pending">Pending</option>
+                <option value="failed">Failed</option>
+                <option value="ignored">Ignored</option>
+              </select>
+              <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={plgPaymentFilter} onChange={(event) => setPlgPaymentFilter(event.target.value)}>
+                <option value="all">Status do pagamento</option>
+                <option value="paid">Paid</option>
+                <option value="unpaid">Unpaid</option>
+                <option value="no_payment_required">No payment required</option>
+                <option value="failed">Failed</option>
+              </select>
+            </div>
+
+            <Card>
+              <CardHeader><CardTitle>Compras PLG</CardTitle></CardHeader>
+              <CardContent className="p-0">
+                {filteredPlgItems.length ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Cliente / Admin</TableHead>
+                        <TableHead>Plano</TableHead>
+                        <TableHead>Valor</TableHead>
+                        <TableHead>Pagamento</TableHead>
+                        <TableHead>Conta</TableHead>
+                        <TableHead>Ação</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredPlgItems.slice(0, 120).map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>
+                            {item.company_name || "-"}
+                            <p className="text-xs text-muted-foreground">{item.admin_name || "-"} · {item.admin_email || "-"}</p>
+                          </TableCell>
+                          <TableCell>{item.plan_name || "-"}<p className="text-xs text-muted-foreground">{billingCycleLabel(item.billing_cycle)}</p></TableCell>
+                          <TableCell className="font-mono">{formatCurrency(Number(item.amount_total || 0))}</TableCell>
+                          <TableCell><Badge variant={(item.payment_status || "").toLowerCase() === "paid" ? "default" : "outline"}>{item.payment_status || "-"}</Badge></TableCell>
+                          <TableCell><Badge variant={["linked", "created"].includes((item.account_creation_status || "").toLowerCase()) ? "default" : "outline"}>{item.account_creation_status || "-"}</Badge></TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={!item.firstline_company_id}
+                              onClick={() => void handleOpenCompany({ id: String(item.firstline_company_id), name: item.company_name })}
+                            >
+                              Ver cliente
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : <EmptyState message="Nenhuma compra PLG com os filtros atuais." />}
+              </CardContent>
+            </Card>
+          </section>
         </TabsContent>
       </Tabs>
 
