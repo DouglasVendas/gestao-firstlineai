@@ -1331,74 +1331,6 @@ def create_app() -> Flask:
             except (TypeError, ValueError):
                 return 0.0
 
-        def normalize_text(value: Any) -> str:
-            return re.sub(r'\s+', ' ', str(value or '').strip().lower())
-
-        def is_referral_text(value: Any) -> bool:
-            text_value = str(value or '').lower()
-            if not text_value:
-                return False
-            keywords = ['indic', 'referr', 'parceir', 'afiliad']
-            return any(keyword in text_value for keyword in keywords)
-
-        def referrer_from_text(value: Any) -> str | None:
-            text_value = str(value or '')
-            if not text_value:
-                return None
-            patterns = [
-                r'(?:indica(?:ç|c)[aã]o\s+(?:do|de)\s+)([A-Za-zÀ-ÿ0-9 _\.-]{2,80})',
-                r'(?:indicado\s+por\s+)([A-Za-zÀ-ÿ0-9 _\.-]{2,80})',
-                r'(?:referral\s+(?:from|by)\s+)([A-Za-zÀ-ÿ0-9 _\.-]{2,80})',
-            ]
-            for pattern in patterns:
-                match = re.search(pattern, text_value, flags=re.IGNORECASE)
-                if match:
-                    name = re.sub(r'\s+', ' ', (match.group(1) or '').strip(" .,:;-"))
-                    if len(name) >= 2:
-                        return name
-            return None
-
-        def referrer_domain(value: Any) -> str | None:
-            text_value = str(value or '').strip()
-            if not text_value:
-                return None
-            url_value = text_value if text_value.startswith(('http://', 'https://')) else f'https://{text_value}'
-            try:
-                hostname = urlparse(url_value).hostname or ''
-            except Exception:
-                return None
-            hostname = hostname.lower()
-            if hostname.startswith('www.'):
-                hostname = hostname[4:]
-            return hostname or None
-
-        deals = supabase().select_many(
-            'deals',
-            'select=id,title,company,contact_name,contact_email,value,stage,source,notes,lost_reason,utm_source,utm_medium,utm_campaign,created_at,updated_at&order=created_at.desc&limit=1200',
-        )
-        deal_tag_links = supabase().select_many(
-            'deal_tag_links',
-            'select=deal_id,tag_id&limit=5000',
-        )
-        deal_tags = supabase().select_many(
-            'deal_tags',
-            'select=id,name&limit=500',
-        )
-        lead_captures = supabase().select_many(
-            'lead_captures',
-            'select=id,name,email,company,form_source,page_url,utm_source,utm_medium,utm_campaign,referrer,status,deal_id,converted_at,created_at&order=created_at.desc&limit=1200',
-        )
-        purchases = supabase().select_many(
-            'backoffice_stripe_purchases',
-            'select=id,firstline_company_id,company_name,admin_name,admin_email,plan_name,billing_cycle,seat_quantity,amount_total,currency,payment_status,subscription_status,account_creation_status,account_creation_error,created_at,processed_at&order=created_at.desc&limit=1200',
-        )
-        try:
-            billing_rows = supabase().select_many(
-                'backoffice_company_billing',
-                'select=firstline_company_id,expected_mrr,expected_arr,billing_health,next_billing_date',
-            )
-        except Exception:
-            billing_rows = []
         with firstline_db().engine.connect() as conn:
             companies_rows = conn.execute(
                 text(
@@ -1406,164 +1338,73 @@ def create_app() -> Flask:
                     WITH latest_plan AS (
                         SELECT DISTINCT ON (cs.company_id)
                                cs.company_id,
-                               s.name AS plan_name
+                               cs.status AS subscription_status,
+                               cs.expiration_date,
+                               s.name AS plan_name,
+                               s.price AS unit_price,
+                               s.payment_type
                         FROM public.company_subscription cs
                         JOIN public.subscription s ON s.id = cs.subscription_id
-                        WHERE cs.status = 'active'
                         ORDER BY cs.company_id, COALESCE(cs.updated_at, cs.created_at) DESC
                     )
                     SELECT c.id,
                            c.company_name,
                            c.contact_email,
                            c.account_status,
+                           c.responsible_name,
                            c.referred_by,
+                           c.max_active_users,
                            c.created_at,
                            c.updated_at,
-                           lp.plan_name
+                           lp.subscription_status,
+                           lp.expiration_date,
+                           lp.plan_name,
+                           lp.unit_price,
+                           lp.payment_type,
+                           rl.token AS referral_token,
+                           ru.name AS referral_user_name,
+                           ru.email AS referral_user_email
                     FROM public.company c
                     LEFT JOIN latest_plan lp ON lp.company_id = c.id
+                    LEFT JOIN public.referral_links rl
+                      ON upper(trim(coalesce(c.referred_by, ''))) = upper(trim(coalesce(rl.token, '')))
+                    LEFT JOIN public.users ru ON ru.id = rl.user_id
                     ORDER BY c.created_at DESC NULLS LAST
                     """
                 )
             ).mappings().all()
         companies = rows_to_dicts(companies_rows)
-        billing_by_company = {str(item.get('firstline_company_id') or ''): item for item in billing_rows}
-
-        company_by_email: dict[str, dict[str, Any]] = {}
-        company_by_name: dict[str, dict[str, Any]] = {}
-        for company in companies:
-            email_key = normalize_text(company.get('contact_email'))
-            name_key = normalize_text(company.get('company_name'))
-            if email_key and email_key not in company_by_email:
-                company_by_email[email_key] = company
-            if name_key and name_key not in company_by_name:
-                company_by_name[name_key] = company
-
-        lead_by_deal: dict[str, dict[str, Any]] = {}
-        for lead in lead_captures:
-            deal_id = str(lead.get('deal_id') or '')
-            if not deal_id:
-                continue
-            lead_by_deal[deal_id] = lead
-
-        tag_name_by_id = {str(tag.get('id')): str(tag.get('name') or '') for tag in deal_tags}
-        tags_by_deal: dict[str, list[str]] = {}
-        for link in deal_tag_links:
-            deal_id = str(link.get('deal_id') or '')
-            tag_id = str(link.get('tag_id') or '')
-            if not deal_id or not tag_id:
-                continue
-            tag_name = tag_name_by_id.get(tag_id)
-            if not tag_name:
-                continue
-            tags_by_deal.setdefault(deal_id, []).append(tag_name)
 
         referral_items: list[dict[str, Any]] = []
-        for deal in deals:
-            stage = str(deal.get('stage') or '').lower()
-            source = deal.get('source')
-            notes = deal.get('notes')
-            utm_source = deal.get('utm_source')
-            utm_medium = deal.get('utm_medium')
-            utm_campaign = deal.get('utm_campaign')
-            deal_id = str(deal.get('id') or '')
-            lead = lead_by_deal.get(deal_id)
-            deal_tag_names = tags_by_deal.get(deal_id, [])
-
-            referral_flag = (
-                is_referral_text(source)
-                or is_referral_text(notes)
-                or is_referral_text(utm_source)
-                or is_referral_text(utm_medium)
-                or any(is_referral_text(tag_name) for tag_name in deal_tag_names)
-                or (lead and (
-                    is_referral_text(lead.get('utm_source'))
-                    or is_referral_text(lead.get('utm_medium'))
-                    or is_referral_text(lead.get('form_source'))
-                    or is_referral_text(lead.get('referrer'))
-                ))
-            )
-            if not referral_flag:
-                continue
-
-            referrer_name = (
-                referrer_from_text(notes)
-                or referrer_from_text(source)
-                or next((referrer_from_text(tag_name) for tag_name in deal_tag_names if referrer_from_text(tag_name)), None)
-                or referrer_from_text(lead.get('referrer') if lead else None)
-                or referrer_domain(lead.get('referrer') if lead else None)
-                or 'Não identificado'
-            )
-            origin = (
-                next((tag_name for tag_name in deal_tag_names if is_referral_text(tag_name)), None)
-                or
-                (lead.get('utm_source') if lead else None)
-                or (lead.get('form_source') if lead else None)
-                or utm_source
-                or source
-                or 'indicação'
-            )
-
-            value = as_float(deal.get('value'))
-            is_converted = stage == 'closed_won'
-            matched_company = (
-                company_by_email.get(normalize_text(deal.get('contact_email')))
-                or company_by_name.get(normalize_text(deal.get('company')))
-                or company_by_name.get(normalize_text(lead.get('company') if lead else None))
-            )
-
-            referral_items.append(
-                json_safe(
-                    {
-                        'id': deal_id,
-                        'referrer_name': referrer_name,
-                        'origin': origin,
-                        'referred_company': deal.get('company'),
-                        'referred_contact': deal.get('contact_name') or deal.get('contact_email') or lead.get('email') if lead else None,
-                        'stage': stage or 'lead',
-                        'value': value,
-                        'is_converted': is_converted,
-                        'deal_tags': deal_tag_names,
-                        'firstline_company_id': matched_company.get('id') if matched_company else None,
-                        'customer_created_at': matched_company.get('created_at') if matched_company else None,
-                        'customer_account_status': matched_company.get('account_status') if matched_company else None,
-                        'lost_reason': deal.get('lost_reason'),
-                        'created_at': deal.get('created_at'),
-                        'updated_at': deal.get('updated_at'),
-                    }
-                )
-            )
-
-        existing_company_ids = {
-            str(item.get('firstline_company_id') or '')
-            for item in referral_items
-            if item.get('firstline_company_id')
-        }
         for company in companies:
             referred_by = str(company.get('referred_by') or '').strip()
             if not referred_by:
                 continue
             company_id = str(company.get('id') or '')
-            if company_id and company_id in existing_company_ids:
-                continue
+            unit_price = as_float(company.get('unit_price'))
+            seats = int(company.get('max_active_users') or 1)
+            value = round(max(unit_price * max(seats, 1), unit_price), 2)
             account_status = str(company.get('account_status') or '').lower()
-            billing_row = billing_by_company.get(company_id, {})
-            plan_name = str(company.get('plan_name') or '').strip()
-            expected_mrr = as_float(billing_row.get('expected_mrr'))
-            is_converted = account_status in {'active', 'trial'} or bool(plan_name) or expected_mrr > 0
+            subscription_status = str(company.get('subscription_status') or '').lower()
+            is_converted = account_status in {'active', 'trial'} or subscription_status in {'active', 'trialing'}
+            referrer_name = (
+                str(company.get('referral_user_name') or '').strip()
+                or str(company.get('referral_user_email') or '').strip()
+                or f'Token {referred_by}'
+            )
             referral_items.append(
                 json_safe(
                     {
-                        'id': f'company:{company_id or normalize_text(company.get("company_name"))}',
-                        'referrer_name': referrer_from_text(referred_by) or referred_by,
-                        'origin': 'company.referred_by',
+                        'id': f'company:{company_id}',
+                        'referrer_name': referrer_name,
+                        'origin': 'referral_link_token',
                         'referred_company': company.get('company_name'),
-                        'referred_contact': company.get('contact_email'),
+                        'referred_contact': company.get('contact_email') or company.get('responsible_name'),
                         'stage': 'closed_won' if is_converted else 'lead',
-                        'value': expected_mrr,
+                        'value': value,
                         'is_converted': is_converted,
-                        'deal_tags': [],
-                        'firstline_company_id': company_id or None,
+                        'deal_tags': [f'token:{referred_by}'],
+                        'firstline_company_id': company_id,
                         'customer_created_at': company.get('created_at'),
                         'customer_account_status': company.get('account_status'),
                         'lost_reason': None,
@@ -1616,23 +1457,25 @@ def create_app() -> Flask:
         plg_revenue = 0.0
         plg_items: list[dict[str, Any]] = []
 
-        for purchase in purchases:
-            status = str(purchase.get('account_creation_status') or 'pending').lower()
-            payment_status = str(purchase.get('payment_status') or '').lower()
-            subscription_status = str(purchase.get('subscription_status') or '').lower()
-            created_at = purchase.get('created_at')
-            amount = as_float(purchase.get('amount_total'))
+        for company in companies:
+            if str(company.get('referred_by') or '').strip():
+                continue
+            account_status = str(company.get('account_status') or '').lower()
+            subscription_status = str(company.get('subscription_status') or '').lower()
+            created_at = company.get('created_at')
+            seats = int(company.get('max_active_users') or 1)
+            unit_price = as_float(company.get('unit_price'))
+            amount = round(max(unit_price * max(seats, 1), unit_price), 2)
+            payment_status = 'paid' if account_status in {'active', 'trial'} else 'pending'
+            status = 'linked'
 
             if payment_status == 'paid':
                 paid_purchases += 1
                 plg_revenue += amount
-            if status in {'linked', 'created'}:
-                linked_purchases += 1
-            elif status == 'failed':
-                failed_purchases += 1
-            else:
+            linked_purchases += 1
+            if payment_status != 'paid':
                 pending_purchases += 1
-            if subscription_status in {'active', 'trialing'}:
+            if subscription_status in {'active', 'trialing'} or account_status in {'active', 'trial'}:
                 active_subscriptions += 1
 
             month_key = '-'
@@ -1644,27 +1487,26 @@ def create_app() -> Flask:
             if payment_status == 'paid':
                 month_row['paid'] += 1
                 month_row['revenue'] = round(month_row['revenue'] + amount, 2)
-            if status in {'linked', 'created'}:
-                month_row['linked'] += 1
+            month_row['linked'] += 1
 
             plg_items.append(
                 json_safe(
                     {
-                        'id': purchase.get('id'),
+                        'id': str(company.get('id')),
                         'created_at': created_at,
-                        'company_name': purchase.get('company_name'),
-                        'admin_name': purchase.get('admin_name'),
-                        'admin_email': purchase.get('admin_email'),
-                        'plan_name': purchase.get('plan_name'),
-                        'billing_cycle': purchase.get('billing_cycle'),
-                        'seat_quantity': purchase.get('seat_quantity'),
+                        'company_name': company.get('company_name'),
+                        'admin_name': company.get('responsible_name'),
+                        'admin_email': company.get('contact_email'),
+                        'plan_name': company.get('plan_name'),
+                        'billing_cycle': 'monthly' if str(company.get('payment_type') or '').lower() != 'yearly' else 'yearly',
+                        'seat_quantity': seats,
                         'amount_total': amount,
-                        'currency': purchase.get('currency') or 'BRL',
-                        'payment_status': purchase.get('payment_status'),
-                        'subscription_status': purchase.get('subscription_status'),
-                        'account_creation_status': purchase.get('account_creation_status'),
-                        'account_creation_error': purchase.get('account_creation_error'),
-                        'firstline_company_id': purchase.get('firstline_company_id'),
+                        'currency': 'BRL',
+                        'payment_status': payment_status,
+                        'subscription_status': subscription_status or account_status,
+                        'account_creation_status': status,
+                        'account_creation_error': None,
+                        'firstline_company_id': company.get('id'),
                     }
                 )
             )
@@ -1936,26 +1778,21 @@ def create_app() -> Flask:
     @app.get('/internal/health')
     def health():
         try:
-            db = supabase()
-            auth_tables = {
-                'internal_users': db.count('internal_users'),
-                'backoffice_audit_log': db.count('backoffice_audit_log'),
+            operational = firstline_db()
+            tables = {
+                'internal_users': operational.count('internal_users'),
+                'backoffice_audit_log': operational.count('backoffice_audit_log'),
             }
-            firstline = {'database': 'not_configured', 'tables': {}}
-            try:
-                operational = firstline_db()
-                firstline = {
-                    'database': 'connected',
-                    'tables': {
-                        'company': operational.count('company'),
-                        'users': operational.count('users'),
-                        'subscription': operational.count('subscription'),
-                        'analyses': operational.count('analyses'),
-                    },
-                }
-            except Exception as exc:
-                firstline = {'database': 'error', 'error': str(exc), 'tables': {}}
-            return jsonify({'success': True, 'service': 'firstline-backoffice-backend', 'database': 'connected', 'tables': auth_tables, 'firstline': firstline})
+            firstline = {
+                'database': 'connected',
+                'tables': {
+                    'company': operational.count('company'),
+                    'users': operational.count('users'),
+                    'subscription': operational.count('subscription'),
+                    'analyses': operational.count('analyses'),
+                },
+            }
+            return jsonify({'success': True, 'service': 'firstline-backoffice-backend', 'database': 'connected', 'tables': tables, 'firstline': firstline})
         except Exception as exc:
             return jsonify({'success': False, 'service': 'firstline-backoffice-backend', 'database': 'error', 'error': str(exc)}), 503
 
@@ -2104,36 +1941,13 @@ def create_app() -> Flask:
         company = db.get_company(company_id)
         if not company:
             return jsonify({'success': False, 'error': 'Empresa não encontrada'}), 404
-        encoded_company_id = quote(company_id, safe='')
-
-        billing = supabase().select_one(
-            'backoffice_company_billing',
-            f'firstline_company_id=eq.{encoded_company_id}&select=*',
-        )
-        billing_events = supabase().select_many(
-            'backoffice_billing_events',
-            f'firstline_company_id=eq.{encoded_company_id}&select=*&order=event_date.desc&limit=50',
-        )
-        stripe_events = supabase().select_many(
-            'backoffice_stripe_events',
-            f'firstline_company_id=eq.{encoded_company_id}&select=id,stripe_event_id,event_type,stripe_object_id,processing_status,error_message,created_at,processed_at&order=created_at.desc&limit=30',
-        )
-        stripe_purchases = supabase().select_many(
-            'backoffice_stripe_purchases',
-            f'firstline_company_id=eq.{encoded_company_id}&select=*&order=created_at.desc&limit=30',
-        )
-
-        stripe_customer_id = billing.get('stripe_customer_id') if billing else None
-        if stripe_customer_id:
-            encoded_customer_id = quote(str(stripe_customer_id), safe='')
-            purchases_by_customer = supabase().select_many(
-                'backoffice_stripe_purchases',
-                f'stripe_customer_id=eq.{encoded_customer_id}&select=*&order=created_at.desc&limit=30',
-            )
-            existing_ids = {str(item.get('id')) for item in stripe_purchases}
-            for purchase in purchases_by_customer:
-                if str(purchase.get('id')) not in existing_ids:
-                    stripe_purchases.append(purchase)
+        candidates = db.list_billing_candidates()
+        candidate = next((item for item in candidates if str(item.get('firstline_company_id')) == company_id), None)
+        billing_items = merge_billing_rows([candidate], {}) if candidate else []
+        billing = billing_items[0] if billing_items else None
+        billing_events: list[dict[str, Any]] = []
+        stripe_events: list[dict[str, Any]] = []
+        stripe_purchases: list[dict[str, Any]] = []
 
         alerts_payload = db.list_alerts()
         alerts = [item for item in alerts_payload.get('items', []) if str(item.get('company_id')) == company_id]
@@ -2313,114 +2127,76 @@ def create_app() -> Flask:
     @require_internal
     def billing_overview():
         candidates = firstline_db().list_billing_candidates()
-        items = merge_billing_rows(candidates, billing_rows_by_company())
-        purchases = supabase().select_many(
-            'backoffice_stripe_purchases',
-            'select=*&order=created_at.desc&limit=100',
-        )
+        items = merge_billing_rows(candidates, {})
+        purchases: list[dict[str, Any]] = []
         purchase_summary = {
-            'pending': sum(1 for item in purchases if item.get('account_creation_status') == 'pending'),
-            'linked': sum(1 for item in purchases if item.get('account_creation_status') == 'linked'),
-            'created': sum(1 for item in purchases if item.get('account_creation_status') == 'created'),
-            'failed': sum(1 for item in purchases if item.get('account_creation_status') == 'failed'),
-            'total': len(purchases),
+            'pending': 0,
+            'linked': 0,
+            'created': 0,
+            'failed': 0,
+            'total': 0,
         }
-        return jsonify({'success': True, 'items': items, 'summary': billing_summary(items), 'stripe_purchases': purchases, 'stripe_purchase_summary': purchase_summary})
+        return jsonify({
+            'success': True,
+            'items': items,
+            'summary': billing_summary(items),
+            'stripe_purchases': purchases,
+            'stripe_purchase_summary': purchase_summary,
+            'message': 'Financeiro consolidado a partir do dump FIRSTLINE_DB_URI.',
+        })
 
     @app.get('/internal/billing/stripe-purchases')
     @require_internal
     def stripe_purchases():
-        rows = supabase().select_many(
-            'backoffice_stripe_purchases',
-            'select=*&order=created_at.desc&limit=100',
-        )
-        return jsonify({'success': True, 'items': rows})
+        return jsonify({'success': True, 'items': [], 'message': 'Tabela de compras Stripe não existe no dump atual.'})
 
     @app.post('/internal/billing/sync')
     @require_internal
     def sync_billing():
         candidates = firstline_db().list_billing_candidates()
-        existing = billing_rows_by_company()
-        payload = [
-            billing_payload_from_company(company, g.internal_user.get('email'))
-            for company in candidates
-            if str(company.get('firstline_company_id')) not in existing
-        ]
-        created = supabase().insert('backoffice_company_billing', payload) if payload else []
-        if created:
-            supabase().insert(
-                'backoffice_billing_events',
-                [
-                    {
-                        'billing_id': row.get('id'),
-                        'firstline_company_id': row.get('firstline_company_id'),
-                        'event_type': 'BILLING_FORECAST_CREATED',
-                        'event_source': 'system',
-                        'description': 'Previsão financeira criada a partir do plano ativo da FirstLine',
-                        'after_data': row,
-                        'created_by': g.internal_user.get('email'),
-                    }
-                    for row in created
-                ],
-            )
-        items = merge_billing_rows(candidates, billing_rows_by_company())
-        return jsonify({'success': True, 'created': len(created), 'items': items, 'summary': billing_summary(items)})
+        items = merge_billing_rows(candidates, {})
+        return jsonify({
+            'success': True,
+            'created': 0,
+            'items': items,
+            'summary': billing_summary(items),
+            'message': 'Sincronização Stripe/Supabase desativada neste modo (somente dump).',
+        })
 
     @app.patch('/internal/billing/companies/<string:company_id>')
     @require_internal
     def update_billing_company(company_id: str):
-        allowed_fields = {
-            'plan_name',
-            'billing_cycle',
-            'contracted_seats',
-            'unit_price',
-            'discount_type',
-            'discount_value',
-            'discount_reason',
-            'discount_expires_at',
-            'start_date',
-            'last_billing_date',
-            'next_billing_date',
-            'billing_health',
-            'access_policy',
-            'notes',
-            'stripe_customer_id',
-            'stripe_subscription_id',
-            'stripe_price_id',
-            'stripe_product_id',
-        }
         data = request.get_json(silent=True) or {}
-        payload = {key: value for key, value in data.items() if key in allowed_fields}
-        if not payload:
-            return jsonify({'success': False, 'error': 'Nenhum campo permitido informado'}), 400
-        payload['updated_by'] = g.internal_user.get('email')
-
-        encoded_company_id = quote(company_id, safe='')
-        before = supabase().select_one('backoffice_company_billing', f'firstline_company_id=eq.{encoded_company_id}&select=*')
-        if not before:
-            company = next((item for item in firstline_db().list_billing_candidates() if str(item.get('firstline_company_id')) == company_id), None)
-            if not company:
-                return jsonify({'success': False, 'error': 'Empresa não encontrada'}), 404
-            created_payload = {**billing_payload_from_company(company, g.internal_user.get('email')), **payload}
-            rows = supabase().insert('backoffice_company_billing', created_payload)
-        else:
-            rows = supabase().update_rows('backoffice_company_billing', f'firstline_company_id=eq.{encoded_company_id}', payload)
-
-        billing = rows[0] if rows else None
-        supabase().insert(
-            'backoffice_billing_events',
-            {
-                'billing_id': billing.get('id') if billing else None,
-                'firstline_company_id': company_id,
-                'event_type': 'BILLING_FORECAST_UPDATED',
-                'event_source': 'manual',
-                'description': data.get('reason') or 'Ajuste manual de previsão financeira',
-                'before_data': before,
-                'after_data': billing,
-                'created_by': g.internal_user.get('email'),
-            },
+        db = firstline_db()
+        before_company = db.get_company(company_id)
+        if not before_company:
+            return jsonify({'success': False, 'error': 'Empresa não encontrada'}), 404
+        contracted_seats = data.get('contracted_seats')
+        if contracted_seats is not None:
+            try:
+                contracted_seats = int(contracted_seats)
+            except (TypeError, ValueError):
+                return jsonify({'success': False, 'error': 'contracted_seats inválido'}), 400
+            db.set_company_limits(company_id, None, contracted_seats)
+        after_company = db.get_company(company_id)
+        db.create_audit_log(
+            g.internal_user,
+            'BILLING_DERIVED_UPDATED',
+            'company',
+            company_id,
+            before_company,
+            after_company,
+            data.get('reason') or 'Ajuste operacional de billing no modo dump',
         )
-        return jsonify({'success': True, 'billing': billing})
+        candidates = db.list_billing_candidates()
+        candidate = next((item for item in candidates if str(item.get('firstline_company_id')) == company_id), None)
+        billing_items = merge_billing_rows([candidate], {}) if candidate else []
+        billing = billing_items[0] if billing_items else None
+        return jsonify({
+            'success': True,
+            'billing': billing,
+            'message': 'No modo dump, apenas contracted_seats é persistido (company.max_active_users).',
+        })
 
     @app.get('/internal/alerts')
     @require_internal
@@ -2450,74 +2226,6 @@ def create_app() -> Flask:
             if not item.get('alert_code') or item.get('severity') not in severity_rank:
                 return
             items.append(json_safe(item))
-
-        try:
-            billing_rows = supabase().select_many(
-                'backoffice_company_billing',
-                'select=firstline_company_id,firstline_company_name,plan_name,billing_health,next_billing_date,contracted_seats,active_users_count_cached,updated_at',
-            )
-            for row in billing_rows:
-                health = str(row.get('billing_health') or '')
-                company_id = str(row.get('firstline_company_id') or '')
-                if not company_id:
-                    continue
-
-                if health in {'overdue', 'payment_failed'}:
-                    append_alert(
-                        {
-                            'company_id': company_id,
-                            'company_name': row.get('firstline_company_name'),
-                            'plan_name': row.get('plan_name'),
-                            'max_active_users': row.get('contracted_seats'),
-                            'active_users_total': row.get('active_users_count_cached'),
-                            'alert_code': 'BILLING_CRITICAL',
-                            'severity': 'high',
-                            'message': 'Cobrança crítica (atrasada/falha de pagamento)',
-                            'source': 'billing',
-                            'billing_health': health,
-                            'next_billing_date': row.get('next_billing_date'),
-                            'event_date': row.get('updated_at'),
-                        }
-                    )
-                elif health in {'due_soon', 'trial_expiring', 'manual_review', 'not_configured'}:
-                    append_alert(
-                        {
-                            'company_id': company_id,
-                            'company_name': row.get('firstline_company_name'),
-                            'plan_name': row.get('plan_name'),
-                            'max_active_users': row.get('contracted_seats'),
-                            'active_users_total': row.get('active_users_count_cached'),
-                            'alert_code': 'BILLING_ATTENTION',
-                            'severity': 'medium',
-                            'message': 'Cobrança requer atenção operacional',
-                            'source': 'billing',
-                            'billing_health': health,
-                            'next_billing_date': row.get('next_billing_date'),
-                            'event_date': row.get('updated_at'),
-                        }
-                    )
-
-            pending_purchases = supabase().select_many(
-                'backoffice_stripe_purchases',
-                'account_creation_status=in.(pending,failed)&select=id,firstline_company_id,company_name,plan_name,account_creation_status,account_creation_error,created_at&order=created_at.desc&limit=100',
-            )
-            for purchase in pending_purchases:
-                company_id = purchase.get('firstline_company_id')
-                status = str(purchase.get('account_creation_status') or 'pending')
-                append_alert(
-                    {
-                        'company_id': str(company_id) if company_id else None,
-                        'company_name': purchase.get('company_name') or 'Checkout Stripe sem empresa',
-                        'plan_name': purchase.get('plan_name'),
-                        'alert_code': 'STRIPE_LINK_REQUIRED',
-                        'severity': 'high' if status == 'failed' else 'medium',
-                        'message': 'Compra Stripe pendente de vínculo/criação de conta',
-                        'source': 'stripe',
-                        'event_date': purchase.get('created_at'),
-                    }
-                )
-        except Exception:
-            pass
 
         unique: dict[str, dict[str, Any]] = {}
         for item in items:
