@@ -1407,6 +1407,18 @@ def create_app() -> Flask:
                 )
             ).mappings().all()
         companies = rows_to_dicts(companies_rows)
+        paid_plan_prices = {'professional': 0.0, 'enterprise': 0.0}
+        for plan in firstline_db().list_plans():
+            name = normalize_plan_name(plan.get('name'))
+            if is_trial_plan(name):
+                continue
+            price = as_float(plan.get('price'))
+            if price <= 0:
+                continue
+            if 'professional' in name and paid_plan_prices['professional'] <= 0:
+                paid_plan_prices['professional'] = price
+            if 'enterprise' in name and paid_plan_prices['enterprise'] <= 0:
+                paid_plan_prices['enterprise'] = price
 
         referral_items: list[dict[str, Any]] = []
         for company in companies:
@@ -1414,10 +1426,16 @@ def create_app() -> Flask:
             if not referred_by:
                 continue
             company_id = str(company.get('id') or '')
+            plan_name = company.get('plan_name')
+            normalized_plan_name = normalize_plan_name(plan_name)
             unit_price = as_float(company.get('unit_price'))
+            if unit_price <= 0 and is_trial_plan(normalized_plan_name):
+                if 'professional' in normalized_plan_name and paid_plan_prices['professional'] > 0:
+                    unit_price = paid_plan_prices['professional']
+                elif 'enterprise' in normalized_plan_name and paid_plan_prices['enterprise'] > 0:
+                    unit_price = paid_plan_prices['enterprise']
             users_count = int(company.get('users_count') or 0)
             value = round(unit_price * users_count, 2)
-            plan_name = company.get('plan_name')
             had_trial_history = bool(company.get('had_trial_history'))
             is_converted = had_trial_history and is_paid_plan(plan_name)
             referrer_name = (
