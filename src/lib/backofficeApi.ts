@@ -74,6 +74,30 @@ export const backofficeApi = {
       `/internal/users?page=${page}&page_size=${pageSize}&search=${encodedSearch}`,
     );
   },
+  updateUserStatus(linkId: string, payload: { status: string; reason?: string }) {
+    return request<{ success: boolean; item: CompanyUserLink }>(`/internal/users/${linkId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  updateUserRole(linkId: string, payload: { role?: string; seller_type?: string; reason?: string }) {
+    return request<{ success: boolean; item: CompanyUserLink }>(`/internal/users/${linkId}/role`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  updateUserOnboarding(linkId: string, payload: { completed: boolean; reason?: string }) {
+    return request<{ success: boolean; item: CompanyUserLink }>(`/internal/users/${linkId}/onboarding`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  removeUserLink(linkId: string, reason?: string) {
+    return request<{ success: boolean; deleted: boolean }>(`/internal/users/${linkId}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason }),
+    });
+  },
   plans() {
     return request<{ success: boolean; plans: Plan[]; message?: string }>('/internal/plans');
   },
@@ -194,16 +218,25 @@ export type CompanyDetail = Company & {
 
 export type CompanyUserLink = {
   link_id: string;
+  company_id?: string;
   company_name?: string;
   role?: string;
   seller_type?: string;
   linked_at?: string;
+  onboarding_completed_at?: string;
+  user_id?: string;
   user_name?: string;
   user_email?: string;
   user_phone?: string;
   user_status?: string;
   calendar_connected?: boolean;
   microsoft_calendar_connected?: boolean;
+  user_created_at?: string;
+  user_updated_at?: string;
+  analyses_total?: number;
+  analyses_7d?: number;
+  analyses_30d?: number;
+  last_analysis_at?: string;
 };
 
 export type UsersSummary = {
@@ -211,6 +244,11 @@ export type UsersSummary = {
   links_active_users: number;
   companies_total: number;
   users_total: number;
+  links_with_calendar?: number;
+  links_without_calendar?: number;
+  links_no_usage_7d?: number;
+  links_no_usage_30d?: number;
+  onboarding_pending?: number;
 };
 
 export type Plan = {

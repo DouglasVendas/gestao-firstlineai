@@ -484,6 +484,15 @@ class FirstlineDb:
             rows = conn.execute(
                 text(
                     f"""
+                    WITH user_analytics AS (
+                        SELECT a.user_id,
+                               count(a.id) AS analyses_total,
+                               count(a.id) FILTER (WHERE a.created_at >= now() - interval '7 days') AS analyses_7d,
+                               count(a.id) FILTER (WHERE a.created_at >= now() - interval '30 days') AS analyses_30d,
+                               max(a.created_at) AS last_analysis_at
+                        FROM public.analyses a
+                        GROUP BY a.user_id
+                    )
                     SELECT uc.id AS link_id,
                            uc.company_id,
                            c.company_name,
@@ -499,10 +508,15 @@ class FirstlineDb:
                            u.calendar_connected,
                            u.microsoft_calendar_connected,
                            u.created_at AS user_created_at,
-                           u.updated_at AS user_updated_at
+                           u.updated_at AS user_updated_at,
+                           COALESCE(ua.analyses_total, 0) AS analyses_total,
+                           COALESCE(ua.analyses_7d, 0) AS analyses_7d,
+                           COALESCE(ua.analyses_30d, 0) AS analyses_30d,
+                           ua.last_analysis_at
                     FROM public.user_company uc
                     JOIN public.users u ON u.id = uc.user_id
                     LEFT JOIN public.company c ON c.id = uc.company_id
+                    LEFT JOIN user_analytics ua ON ua.user_id = u.id
                     {where}
                     ORDER BY uc.created_at DESC NULLS LAST
                     LIMIT :limit OFFSET :offset
@@ -513,11 +527,49 @@ class FirstlineDb:
             summary = conn.execute(
                 text(
                     """
+                    WITH user_analytics AS (
+                        SELECT a.user_id,
+                               count(a.id) FILTER (WHERE a.created_at >= now() - interval '7 days') AS analyses_7d,
+                               count(a.id) FILTER (WHERE a.created_at >= now() - interval '30 days') AS analyses_30d
+                        FROM public.analyses a
+                        GROUP BY a.user_id
+                    )
                     SELECT
                         (SELECT count(*) FROM public.user_company) AS links_total,
                         (SELECT count(*) FROM public.user_company uc JOIN public.users u ON u.id = uc.user_id WHERE u.status = 'ACTIVE') AS links_active_users,
                         (SELECT count(*) FROM public.company) AS companies_total,
-                        (SELECT count(*) FROM public.users) AS users_total
+                        (SELECT count(*) FROM public.users) AS users_total,
+                        (
+                            SELECT count(*)
+                            FROM public.user_company uc
+                            JOIN public.users u ON u.id = uc.user_id
+                            WHERE COALESCE(u.calendar_connected, false) = true OR COALESCE(u.microsoft_calendar_connected, false) = true
+                        ) AS links_with_calendar,
+                        (
+                            SELECT count(*)
+                            FROM public.user_company uc
+                            JOIN public.users u ON u.id = uc.user_id
+                            WHERE COALESCE(u.calendar_connected, false) = false AND COALESCE(u.microsoft_calendar_connected, false) = false
+                        ) AS links_without_calendar,
+                        (
+                            SELECT count(*)
+                            FROM public.user_company uc
+                            JOIN public.users u ON u.id = uc.user_id
+                            LEFT JOIN user_analytics ua ON ua.user_id = u.id
+                            WHERE COALESCE(ua.analyses_7d, 0) = 0
+                        ) AS links_no_usage_7d,
+                        (
+                            SELECT count(*)
+                            FROM public.user_company uc
+                            JOIN public.users u ON u.id = uc.user_id
+                            LEFT JOIN user_analytics ua ON ua.user_id = u.id
+                            WHERE COALESCE(ua.analyses_30d, 0) = 0
+                        ) AS links_no_usage_30d,
+                        (
+                            SELECT count(*)
+                            FROM public.user_company
+                            WHERE onboarding_completed_at IS NULL
+                        ) AS onboarding_pending
                     """
                 )
             ).mappings().first()
@@ -526,6 +578,109 @@ class FirstlineDb:
             'pagination': {'page': page, 'page_size': page_size, 'total': int(total)},
             'summary': json_safe(dict(summary or {})),
         }
+
+    def get_user_link(self, link_id: str) -> dict[str, Any] | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    WITH user_analytics AS (
+                        SELECT a.user_id,
+                               count(a.id) AS analyses_total,
+                               count(a.id) FILTER (WHERE a.created_at >= now() - interval '7 days') AS analyses_7d,
+                               count(a.id) FILTER (WHERE a.created_at >= now() - interval '30 days') AS analyses_30d,
+                               max(a.created_at) AS last_analysis_at
+                        FROM public.analyses a
+                        GROUP BY a.user_id
+                    )
+                    SELECT uc.id AS link_id,
+                           uc.company_id,
+                           c.company_name,
+                           uc.role,
+                           uc.seller_type,
+                           uc.created_at AS linked_at,
+                           uc.onboarding_completed_at,
+                           u.id AS user_id,
+                           u.name AS user_name,
+                           u.email AS user_email,
+                           u.phone AS user_phone,
+                           u.status AS user_status,
+                           u.calendar_connected,
+                           u.microsoft_calendar_connected,
+                           u.created_at AS user_created_at,
+                           u.updated_at AS user_updated_at,
+                           COALESCE(ua.analyses_total, 0) AS analyses_total,
+                           COALESCE(ua.analyses_7d, 0) AS analyses_7d,
+                           COALESCE(ua.analyses_30d, 0) AS analyses_30d,
+                           ua.last_analysis_at
+                    FROM public.user_company uc
+                    JOIN public.users u ON u.id = uc.user_id
+                    LEFT JOIN public.company c ON c.id = uc.company_id
+                    LEFT JOIN user_analytics ua ON ua.user_id = u.id
+                    WHERE uc.id = :link_id
+                    LIMIT 1
+                    """
+                ),
+                {'link_id': link_id},
+            ).mappings().first()
+        return json_safe(dict(row)) if row else None
+
+    def set_user_status_by_link(self, link_id: str, status: str) -> dict[str, Any] | None:
+        status_value = str(status or '').upper()
+        if status_value not in {'ACTIVE', 'INACTIVE', 'SUSPENDED'}:
+            raise ValueError('Status de usuário inválido')
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE public.users u
+                    SET status = :status, updated_at = now()
+                    FROM public.user_company uc
+                    WHERE uc.user_id = u.id AND uc.id = :link_id
+                    """
+                ),
+                {'status': status_value, 'link_id': link_id},
+            )
+        return self.get_user_link(link_id)
+
+    def set_user_link_role(self, link_id: str, role: str | None = None, seller_type: str | None = None) -> dict[str, Any] | None:
+        if role is None and seller_type is None:
+            raise ValueError('Informe role ou seller_type')
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE public.user_company
+                    SET role = COALESCE(:role, role),
+                        seller_type = COALESCE(:seller_type, seller_type)
+                    WHERE id = :link_id
+                    """
+                ),
+                {'role': role, 'seller_type': seller_type, 'link_id': link_id},
+            )
+        return self.get_user_link(link_id)
+
+    def set_user_link_onboarding(self, link_id: str, completed: bool) -> dict[str, Any] | None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE public.user_company
+                    SET onboarding_completed_at = CASE WHEN :completed THEN now() ELSE NULL END
+                    WHERE id = :link_id
+                    """
+                ),
+                {'completed': completed, 'link_id': link_id},
+            )
+        return self.get_user_link(link_id)
+
+    def remove_user_link(self, link_id: str) -> bool:
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                text("DELETE FROM public.user_company WHERE id = :link_id"),
+                {'link_id': link_id},
+            )
+        return (result.rowcount or 0) > 0
 
     def list_company_audit_log(self, company_id: str, page_size: int = 30) -> list[dict[str, Any]]:
         with self.engine.connect() as conn:
@@ -1506,6 +1661,57 @@ def create_app() -> Flask:
         page_size = min(max(int(request.args.get('page_size', 50)), 1), 100)
         data = firstline_db().list_users(page=page, page_size=page_size, search=request.args.get('search'), company_id=request.args.get('company_id'))
         return jsonify({'success': True, **data})
+
+    @app.patch('/internal/users/<string:link_id>/status')
+    @require_internal
+    def update_user_status(link_id: str):
+        data = request.get_json(silent=True) or {}
+        db = firstline_db()
+        before = db.get_user_link(link_id)
+        if not before:
+            return jsonify({'success': False, 'error': 'Vínculo de usuário não encontrado'}), 404
+        updated = db.set_user_status_by_link(link_id, data.get('status'))
+        db.create_audit_log(g.internal_user, 'USER_STATUS_UPDATED', 'user_link', link_id, before, updated, data.get('reason'))
+        return jsonify({'success': True, 'item': updated})
+
+    @app.patch('/internal/users/<string:link_id>/role')
+    @require_internal
+    def update_user_role(link_id: str):
+        data = request.get_json(silent=True) or {}
+        db = firstline_db()
+        before = db.get_user_link(link_id)
+        if not before:
+            return jsonify({'success': False, 'error': 'Vínculo de usuário não encontrado'}), 404
+        updated = db.set_user_link_role(link_id, data.get('role'), data.get('seller_type'))
+        db.create_audit_log(g.internal_user, 'USER_LINK_ROLE_UPDATED', 'user_link', link_id, before, updated, data.get('reason'))
+        return jsonify({'success': True, 'item': updated})
+
+    @app.patch('/internal/users/<string:link_id>/onboarding')
+    @require_internal
+    def update_user_onboarding(link_id: str):
+        data = request.get_json(silent=True) or {}
+        db = firstline_db()
+        before = db.get_user_link(link_id)
+        if not before:
+            return jsonify({'success': False, 'error': 'Vínculo de usuário não encontrado'}), 404
+        completed = bool(data.get('completed'))
+        updated = db.set_user_link_onboarding(link_id, completed)
+        db.create_audit_log(g.internal_user, 'USER_ONBOARDING_UPDATED', 'user_link', link_id, before, updated, data.get('reason'))
+        return jsonify({'success': True, 'item': updated})
+
+    @app.delete('/internal/users/<string:link_id>')
+    @require_internal
+    def delete_user_link(link_id: str):
+        data = request.get_json(silent=True) or {}
+        db = firstline_db()
+        before = db.get_user_link(link_id)
+        if not before:
+            return jsonify({'success': False, 'error': 'Vínculo de usuário não encontrado'}), 404
+        deleted = db.remove_user_link(link_id)
+        if not deleted:
+            return jsonify({'success': False, 'error': 'Não foi possível remover vínculo'}), 400
+        db.create_audit_log(g.internal_user, 'USER_LINK_REMOVED', 'user_link', link_id, before, {'deleted': True}, data.get('reason'))
+        return jsonify({'success': True, 'deleted': True})
 
     @app.get('/internal/plans')
     @require_internal
