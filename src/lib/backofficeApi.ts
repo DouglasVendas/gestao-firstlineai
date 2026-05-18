@@ -262,7 +262,11 @@ export type Plan = {
   subscription_type?: string;
   payment_type?: string;
   price?: number;
+  validity_days?: number;
   status: string;
+  is_default?: boolean;
+  created_at?: string;
+  updated_at?: string;
   companies_count?: number;
 };
 

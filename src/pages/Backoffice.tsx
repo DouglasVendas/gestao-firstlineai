@@ -115,6 +115,24 @@ function accountStatusLabel(value?: string) {
   return labels[(value || "").toLowerCase()] || value || "Sem status";
 }
 
+function planCatalogCategory(value?: string) {
+  const normalized = (value || "").trim().toLowerCase();
+  if (!normalized) return "no_plan";
+  if (normalized.includes("enterprise")) return "enterprise";
+  if (normalized.includes("professional") && normalized.includes("trial")) return "professional_trial";
+  if (normalized.includes("professional")) return "professional";
+  return "other";
+}
+
+function planCatalogLabel(value?: string) {
+  const category = planCatalogCategory(value);
+  if (category === "enterprise") return "Enterprise";
+  if (category === "professional_trial") return "Professional Trial";
+  if (category === "professional") return "Professional";
+  if (category === "no_plan") return "Sem plano";
+  return "Outros";
+}
+
 function EmptyState({ message }: { message: string }) {
   return <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">{message}</div>;
 }
@@ -202,6 +220,9 @@ export default function Backoffice() {
 
   const [userActionLinkId, setUserActionLinkId] = useState<string | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [planSearch, setPlanSearch] = useState("");
+  const [planStatusFilter, setPlanStatusFilter] = useState("all");
+  const [planCatalogFilter, setPlanCatalogFilter] = useState("all");
   const [billingItems, setBillingItems] = useState<BillingCompany[]>([]);
   const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
   const [isSyncingBilling, setIsSyncingBilling] = useState(false);
@@ -577,9 +598,10 @@ export default function Backoffice() {
         billing: !billing,
       };
 
+      const planCategory = planCatalogCategory(company.plan_name);
       const upsellOpportunity =
         (contracted > 0 && activeUsers >= contracted) ||
-        (analyses30 >= 30 && ["starter", "basic", "free", "trial"].some((term) => (company.plan_name || "").toLowerCase().includes(term)));
+        (analyses30 >= 30 && planCategory !== "enterprise");
 
       return {
         ...company,
@@ -614,12 +636,11 @@ export default function Backoffice() {
 
       let matchesPlan = companyPlanFilter === "all";
       if (companyPlanFilter === "no_plan") matchesPlan = !company.plan_name;
-      if (companyPlanFilter === "trial") matchesPlan = planLower.includes("trial") || billing?.billing_cycle === "trial";
-      if (companyPlanFilter === "free") matchesPlan = planLower.includes("free");
-      if (companyPlanFilter === "paid") matchesPlan = !!company.plan_name && !planLower.includes("free") && !planLower.includes("trial");
-      if (companyPlanFilter === "enterprise") matchesPlan = planLower.includes("enterprise");
-      if (!["all", "no_plan", "trial", "free", "paid", "enterprise"].includes(companyPlanFilter)) {
-        matchesPlan = planLower === companyPlanFilter;
+      if (companyPlanFilter === "professional_trial") matchesPlan = planCatalogCategory(company.plan_name) === "professional_trial" || billing?.billing_cycle === "trial";
+      if (companyPlanFilter === "professional") matchesPlan = planCatalogCategory(company.plan_name) === "professional";
+      if (companyPlanFilter === "enterprise") matchesPlan = planCatalogCategory(company.plan_name) === "enterprise";
+      if (companyPlanFilter.startsWith("custom:")) {
+        matchesPlan = planLower === companyPlanFilter.replace("custom:", "");
       }
 
       let matchesBilling = companyBillingFilter === "all";
@@ -703,6 +724,37 @@ export default function Backoffice() {
     () => Array.from(new Set(companies.map((company) => (company.plan_name || "Sem plano").trim()).filter(Boolean))),
     [companies],
   );
+
+  const customCompanyPlanOptions = useMemo(() => {
+    return companyPlans.filter((plan) => !["enterprise", "professional", "professional trial"].includes(plan.trim().toLowerCase()));
+  }, [companyPlans]);
+
+  const planStatuses = useMemo(() => {
+    return Array.from(new Set(plans.map((plan) => (plan.status || "").toLowerCase()).filter(Boolean)));
+  }, [plans]);
+
+  const filteredPlans = useMemo(() => {
+    const term = planSearch.trim().toLowerCase();
+    return plans.filter((plan) => {
+      const matchesSearch =
+        !term ||
+        [plan.name, plan.description, plan.subscription_type, plan.payment_type]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      const matchesStatus = planStatusFilter === "all" || (plan.status || "").toLowerCase() === planStatusFilter;
+      const matchesCatalog = planCatalogFilter === "all" || planCatalogCategory(plan.name) === planCatalogFilter;
+      return matchesSearch && matchesStatus && matchesCatalog;
+    });
+  }, [plans, planSearch, planStatusFilter, planCatalogFilter]);
+
+  const planSummary = useMemo(() => {
+    const total = filteredPlans.length;
+    const active = filteredPlans.filter((plan) => (plan.status || "").toLowerCase() === "active").length;
+    const linkedCompanies = filteredPlans.reduce((sum, plan) => sum + Number(plan.companies_count || 0), 0);
+    const trialPlans = filteredPlans.filter((plan) => planCatalogCategory(plan.name) === "professional_trial").length;
+    return { total, active, linkedCompanies, trialPlans };
+  }, [filteredPlans]);
 
   const sortedCompanies = useMemo(() => {
     const sorted = [...filteredCompanies];
@@ -873,11 +925,10 @@ export default function Backoffice() {
             <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={companyPlanFilter} onChange={(event) => setCompanyPlanFilter(event.target.value)}>
               <option value="all">Plano</option>
               <option value="no_plan">Sem plano</option>
-              <option value="trial">Trial</option>
-              <option value="free">Free</option>
-              <option value="paid">Pago</option>
+              <option value="professional_trial">Professional Trial</option>
+              <option value="professional">Professional</option>
               <option value="enterprise">Enterprise</option>
-              {companyPlans.map((plan) => <option key={plan} value={plan.toLowerCase()}>{plan}</option>)}
+              {customCompanyPlanOptions.map((plan) => <option key={plan} value={`custom:${plan.toLowerCase()}`}>{plan}</option>)}
             </select>
           </div>
 
@@ -1014,7 +1065,70 @@ export default function Backoffice() {
         </TabsContent>
 
         <TabsContent value="plans" className="space-y-4">
-          <Card><CardContent className="p-0">{plans.length ? <Table><TableHeader><TableRow><TableHead>Plano</TableHead><TableHead>Tipo</TableHead><TableHead>Preço</TableHead><TableHead>Empresas</TableHead><TableHead>Status</TableHead></TableRow></TableHeader><TableBody>{plans.map((plan) => <TableRow key={plan.id}><TableCell className="font-medium">{plan.name}<p className="text-xs text-muted-foreground">{plan.description || "-"}</p></TableCell><TableCell>{plan.subscription_type || "-"} / {plan.payment_type || "-"}</TableCell><TableCell>{formatCurrency(Number(plan.price || 0))}</TableCell><TableCell>{plan.companies_count ?? 0}</TableCell><TableCell><Badge variant="outline">{plan.status}</Badge></TableCell></TableRow>)}</TableBody></Table> : <EmptyState message="Nenhum plano retornado ainda." />}</CardContent></Card>
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Planos no resultado</p><p className="mt-2 font-mono text-3xl font-semibold">{planSummary.total}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Planos ativos</p><p className="mt-2 font-mono text-3xl font-semibold text-success">{planSummary.active}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Empresas vinculadas</p><p className="mt-2 font-mono text-3xl font-semibold">{planSummary.linkedCompanies}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Planos Trial</p><p className="mt-2 font-mono text-3xl font-semibold text-warning">{planSummary.trialPlans}</p></CardContent></Card>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-3">
+            <Input placeholder="Buscar por plano, tipo ou descrição" value={planSearch} onChange={(event) => setPlanSearch(event.target.value)} />
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={planCatalogFilter} onChange={(event) => setPlanCatalogFilter(event.target.value)}>
+              <option value="all">Catálogo</option>
+              <option value="enterprise">Enterprise</option>
+              <option value="professional">Professional</option>
+              <option value="professional_trial">Professional Trial</option>
+              <option value="other">Outros</option>
+            </select>
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={planStatusFilter} onChange={(event) => setPlanStatusFilter(event.target.value)}>
+              <option value="all">Status</option>
+              {planStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              {filteredPlans.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Plano</TableHead>
+                      <TableHead>Catálogo</TableHead>
+                      <TableHead>Cobrança</TableHead>
+                      <TableHead>Preço</TableHead>
+                      <TableHead>Validade</TableHead>
+                      <TableHead>Empresas</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredPlans.map((plan) => (
+                      <TableRow key={plan.id}>
+                        <TableCell className="font-medium">
+                          {plan.name}
+                          <p className="text-xs text-muted-foreground">{plan.description || "-"}</p>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={planCatalogCategory(plan.name) === "enterprise" ? "default" : "outline"}>
+                            {planCatalogLabel(plan.name)}
+                          </Badge>
+                          {plan.is_default ? <p className="text-xs text-muted-foreground">Plano padrão</p> : null}
+                        </TableCell>
+                        <TableCell>{plan.subscription_type || "-"} / {plan.payment_type || "-"}</TableCell>
+                        <TableCell className="font-mono">{formatCurrency(Number(plan.price || 0))}</TableCell>
+                        <TableCell>{plan.validity_days ? `${plan.validity_days} dias` : "-"}</TableCell>
+                        <TableCell>{plan.companies_count ?? 0}</TableCell>
+                        <TableCell><Badge variant={(plan.status || "").toLowerCase() === "active" ? "default" : "outline"}>{plan.status}</Badge></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <EmptyState message="Nenhum plano encontrado com esses filtros." />
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="finance" className="space-y-4">
