@@ -1501,74 +1501,19 @@ def create_app() -> Flask:
             conversions = int(row.get('conversions') or 0)
             row['conversion_rate'] = round((conversions / indications * 100) if indications else 0, 1)
 
-        monthly_plg_raw: dict[str, dict[str, Any]] = {}
+        # No modo atual (dump), PLG só deve considerar eventos com marcação explícita de origem PLG.
+        # Como essa marcação ainda não existe no dump, retornamos PLG vazio para evitar inferência incorreta.
+        plg_items: list[dict[str, Any]] = []
+        total_plg = 0
         paid_purchases = 0
         linked_purchases = 0
-        failed_purchases = 0
         pending_purchases = 0
+        failed_purchases = 0
         active_subscriptions = 0
+        plg_paid_rate = 0.0
+        plg_link_rate = 0.0
         plg_revenue = 0.0
-        plg_items: list[dict[str, Any]] = []
-
-        for company in companies:
-            if str(company.get('referred_by') or '').strip():
-                continue
-            account_status = str(company.get('account_status') or '').lower()
-            subscription_status = str(company.get('subscription_status') or '').lower()
-            created_at = company.get('created_at')
-            seats = int(company.get('max_active_users') or 1)
-            unit_price = as_float(company.get('unit_price'))
-            amount = round(max(unit_price * max(seats, 1), unit_price), 2)
-            payment_status = 'paid' if account_status in {'active', 'trial'} else 'pending'
-            status = 'linked'
-
-            if payment_status == 'paid':
-                paid_purchases += 1
-                plg_revenue += amount
-            linked_purchases += 1
-            if payment_status != 'paid':
-                pending_purchases += 1
-            if subscription_status in {'active', 'trialing'} or account_status in {'active', 'trial'}:
-                active_subscriptions += 1
-
-            month_key = '-'
-            parsed_date = parse_date(created_at)
-            if parsed_date:
-                month_key = parsed_date.strftime('%Y-%m')
-            month_row = monthly_plg_raw.setdefault(month_key, {'month': month_key, 'purchases': 0, 'paid': 0, 'linked': 0, 'revenue': 0.0})
-            month_row['purchases'] += 1
-            if payment_status == 'paid':
-                month_row['paid'] += 1
-                month_row['revenue'] = round(month_row['revenue'] + amount, 2)
-            month_row['linked'] += 1
-
-            plg_items.append(
-                json_safe(
-                    {
-                        'id': str(company.get('id')),
-                        'created_at': created_at,
-                        'company_name': company.get('company_name'),
-                        'admin_name': company.get('responsible_name'),
-                        'admin_email': company.get('contact_email'),
-                        'plan_name': company.get('plan_name'),
-                        'billing_cycle': 'monthly' if str(company.get('payment_type') or '').lower() != 'yearly' else 'yearly',
-                        'seat_quantity': seats,
-                        'amount_total': amount,
-                        'currency': 'BRL',
-                        'payment_status': payment_status,
-                        'subscription_status': subscription_status or account_status,
-                        'account_creation_status': status,
-                        'account_creation_error': None,
-                        'firstline_company_id': company.get('id'),
-                    }
-                )
-            )
-
-        total_plg = len(plg_items)
-        plg_paid_rate = round((paid_purchases / total_plg * 100) if total_plg else 0, 1)
-        plg_link_rate = round((linked_purchases / total_plg * 100) if total_plg else 0, 1)
-        plg_revenue = round(plg_revenue, 2)
-        monthly_plg = sorted(monthly_plg_raw.values(), key=lambda row: row['month'], reverse=True)[:12]
+        monthly_plg: list[dict[str, Any]] = []
 
         return {
             'referral': {

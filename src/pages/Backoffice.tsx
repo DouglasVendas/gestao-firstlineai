@@ -1002,20 +1002,6 @@ export default function Backoffice() {
     });
   }, [growthReferral, referralSearch, referralStageFilter]);
 
-  const referralCustomers = useMemo(() => {
-    return (growthReferral?.customers || []).filter((item) => {
-      const term = referralSearch.trim().toLowerCase();
-      const matchesSearch =
-        !term ||
-        [item.referrer_name, item.referred_company, item.referred_contact, item.origin]
-          .join(" ")
-          .toLowerCase()
-          .includes(term);
-      const matchesStage = referralStageFilter === "all" || (item.stage || "").toLowerCase() === referralStageFilter;
-      return matchesSearch && matchesStage;
-    });
-  }, [growthReferral, referralSearch, referralStageFilter]);
-
   const referralKpis = useMemo(() => {
     const items = growthReferral?.items || [];
     const total = items.length;
@@ -1574,6 +1560,7 @@ export default function Backoffice() {
                           <TableHead>Origem</TableHead>
                           <TableHead>Estágio</TableHead>
                           <TableHead>Valor</TableHead>
+                          <TableHead>Ação</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1587,6 +1574,16 @@ export default function Backoffice() {
                             <TableCell>{item.origin || "-"}</TableCell>
                             <TableCell><Badge variant={item.is_converted ? "default" : "outline"}>{dealStageLabel(item.stage)}</Badge></TableCell>
                             <TableCell className="font-mono">{formatCurrency(Number(item.value || 0))}</TableCell>
+                            <TableCell>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={!item.firstline_company_id}
+                                onClick={() => void handleOpenCompany({ id: String(item.firstline_company_id), name: item.referred_company })}
+                              >
+                                Ver cliente
+                              </Button>
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -1607,125 +1604,93 @@ export default function Backoffice() {
                 </CardContent>
               </Card>
             </div>
-
-            <Card>
-              <CardHeader><CardTitle>Clientes já convertidos por indicação</CardTitle></CardHeader>
-              <CardContent className="p-0">
-                {referralCustomers.length ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Cliente</TableHead>
-                        <TableHead>Quem indicou</TableHead>
-                        <TableHead>Origem</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Ação</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {referralCustomers.slice(0, 120).map((item) => (
-                        <TableRow key={`customer-${item.id}-${item.firstline_company_id || "na"}`}>
-                          <TableCell className="font-medium">
-                            {item.referred_company || "-"}
-                            <p className="text-xs text-muted-foreground">{item.referred_contact || "-"}</p>
-                          </TableCell>
-                          <TableCell>{item.referrer_name || "Não identificado"}</TableCell>
-                          <TableCell>{item.origin || "-"}</TableCell>
-                          <TableCell><Badge variant="outline">{accountStatusLabel(item.customer_account_status)}</Badge></TableCell>
-                          <TableCell>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={!item.firstline_company_id}
-                              onClick={() => void handleOpenCompany({ id: String(item.firstline_company_id), name: item.referred_company })}
-                            >
-                              Ver cliente
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : <EmptyState message="Nenhum cliente convertido por indicação encontrado com os filtros atuais." />}
-              </CardContent>
-            </Card>
           </section>
 
           <section className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold">PLG</h3>
-              <Badge variant="outline">{growthPlg?.summary.total_purchases ?? 0} compras totais</Badge>
+              <Badge variant="outline">{growthPlg?.summary.total_purchases ?? 0} eventos rastreados</Badge>
             </div>
+            {(growthPlg?.summary.total_purchases || 0) === 0 ? (
+              <Card>
+                <CardHeader><CardTitle>PLG sem eventos rastreados</CardTitle></CardHeader>
+                <CardContent className="text-sm text-muted-foreground">
+                  No modo atual, PLG só conta quando a origem vem explicitamente marcada como PLG. Como ainda não existe essa marcação no dump, os clientes não são inferidos por exclusão.
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                <div className="grid gap-4 md:grid-cols-5">
+                  <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Compras (filtro)</p><p className="mt-2 font-mono text-2xl font-semibold">{plgFilteredSummary.total}</p></CardContent></Card>
+                  <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Pagas</p><p className="mt-2 font-mono text-2xl font-semibold text-success">{plgFilteredSummary.paid}</p></CardContent></Card>
+                  <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Conta vinculada</p><p className="mt-2 font-mono text-2xl font-semibold">{plgFilteredSummary.linked}</p></CardContent></Card>
+                  <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Taxa de link</p><p className="mt-2 font-mono text-2xl font-semibold">{plgFilteredSummary.linkRate}%</p></CardContent></Card>
+                  <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Receita</p><p className="mt-2 font-mono text-2xl font-semibold text-primary">{formatCurrency(plgFilteredSummary.revenue)}</p></CardContent></Card>
+                </div>
 
-            <div className="grid gap-4 md:grid-cols-5">
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Compras (filtro)</p><p className="mt-2 font-mono text-2xl font-semibold">{plgFilteredSummary.total}</p></CardContent></Card>
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Pagas</p><p className="mt-2 font-mono text-2xl font-semibold text-success">{plgFilteredSummary.paid}</p></CardContent></Card>
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Conta vinculada</p><p className="mt-2 font-mono text-2xl font-semibold">{plgFilteredSummary.linked}</p></CardContent></Card>
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Taxa de link</p><p className="mt-2 font-mono text-2xl font-semibold">{plgFilteredSummary.linkRate}%</p></CardContent></Card>
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Receita</p><p className="mt-2 font-mono text-2xl font-semibold text-primary">{formatCurrency(plgFilteredSummary.revenue)}</p></CardContent></Card>
-            </div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={plgStatusFilter} onChange={(event) => setPlgStatusFilter(event.target.value)}>
+                    <option value="all">Status de criação de conta</option>
+                    <option value="linked">Linked</option>
+                    <option value="created">Created</option>
+                    <option value="pending">Pending</option>
+                    <option value="failed">Failed</option>
+                    <option value="ignored">Ignored</option>
+                  </select>
+                  <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={plgPaymentFilter} onChange={(event) => setPlgPaymentFilter(event.target.value)}>
+                    <option value="all">Status do pagamento</option>
+                    <option value="paid">Paid</option>
+                    <option value="unpaid">Unpaid</option>
+                    <option value="no_payment_required">No payment required</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                </div>
 
-            <div className="grid gap-3 lg:grid-cols-2">
-              <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={plgStatusFilter} onChange={(event) => setPlgStatusFilter(event.target.value)}>
-                <option value="all">Status de criação de conta</option>
-                <option value="linked">Linked</option>
-                <option value="created">Created</option>
-                <option value="pending">Pending</option>
-                <option value="failed">Failed</option>
-                <option value="ignored">Ignored</option>
-              </select>
-              <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={plgPaymentFilter} onChange={(event) => setPlgPaymentFilter(event.target.value)}>
-                <option value="all">Status do pagamento</option>
-                <option value="paid">Paid</option>
-                <option value="unpaid">Unpaid</option>
-                <option value="no_payment_required">No payment required</option>
-                <option value="failed">Failed</option>
-              </select>
-            </div>
-
-            <Card>
-              <CardHeader><CardTitle>Compras PLG</CardTitle></CardHeader>
-              <CardContent className="p-0">
-                {filteredPlgItems.length ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Cliente / Admin</TableHead>
-                        <TableHead>Plano</TableHead>
-                        <TableHead>Valor</TableHead>
-                        <TableHead>Pagamento</TableHead>
-                        <TableHead>Conta</TableHead>
-                        <TableHead>Ação</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredPlgItems.slice(0, 120).map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell>
-                            {item.company_name || "-"}
-                            <p className="text-xs text-muted-foreground">{item.admin_name || "-"} · {item.admin_email || "-"}</p>
-                          </TableCell>
-                          <TableCell>{item.plan_name || "-"}<p className="text-xs text-muted-foreground">{billingCycleLabel(item.billing_cycle)}</p></TableCell>
-                          <TableCell className="font-mono">{formatCurrency(Number(item.amount_total || 0))}</TableCell>
-                          <TableCell><Badge variant={(item.payment_status || "").toLowerCase() === "paid" ? "default" : "outline"}>{item.payment_status || "-"}</Badge></TableCell>
-                          <TableCell><Badge variant={["linked", "created"].includes((item.account_creation_status || "").toLowerCase()) ? "default" : "outline"}>{item.account_creation_status || "-"}</Badge></TableCell>
-                          <TableCell>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={!item.firstline_company_id}
-                              onClick={() => void handleOpenCompany({ id: String(item.firstline_company_id), name: item.company_name })}
-                            >
-                              Ver cliente
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : <EmptyState message="Nenhuma compra PLG com os filtros atuais." />}
-              </CardContent>
-            </Card>
+                <Card>
+                  <CardHeader><CardTitle>Compras PLG</CardTitle></CardHeader>
+                  <CardContent className="p-0">
+                    {filteredPlgItems.length ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Cliente / Admin</TableHead>
+                            <TableHead>Plano</TableHead>
+                            <TableHead>Valor</TableHead>
+                            <TableHead>Pagamento</TableHead>
+                            <TableHead>Conta</TableHead>
+                            <TableHead>Ação</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredPlgItems.slice(0, 120).map((item) => (
+                            <TableRow key={item.id}>
+                              <TableCell>
+                                {item.company_name || "-"}
+                                <p className="text-xs text-muted-foreground">{item.admin_name || "-"} · {item.admin_email || "-"}</p>
+                              </TableCell>
+                              <TableCell>{item.plan_name || "-"}<p className="text-xs text-muted-foreground">{billingCycleLabel(item.billing_cycle)}</p></TableCell>
+                              <TableCell className="font-mono">{formatCurrency(Number(item.amount_total || 0))}</TableCell>
+                              <TableCell><Badge variant={(item.payment_status || "").toLowerCase() === "paid" ? "default" : "outline"}>{item.payment_status || "-"}</Badge></TableCell>
+                              <TableCell><Badge variant={["linked", "created"].includes((item.account_creation_status || "").toLowerCase()) ? "default" : "outline"}>{item.account_creation_status || "-"}</Badge></TableCell>
+                              <TableCell>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={!item.firstline_company_id}
+                                  onClick={() => void handleOpenCompany({ id: String(item.firstline_company_id), name: item.company_name })}
+                                >
+                                  Ver cliente
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : <EmptyState message="Nenhuma compra PLG com os filtros atuais." />}
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </section>
         </TabsContent>
       </Tabs>
