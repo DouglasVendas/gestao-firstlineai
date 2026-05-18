@@ -1326,13 +1326,13 @@ def create_app() -> Flask:
         def as_float(value: Any) -> float:
             if value is None:
                 return 0.0
-
-        def normalize_text(value: Any) -> str:
-            return re.sub(r'\s+', ' ', str(value or '').strip().lower())
             try:
                 return float(value)
             except (TypeError, ValueError):
                 return 0.0
+
+        def normalize_text(value: Any) -> str:
+            return re.sub(r'\s+', ' ', str(value or '').strip().lower())
 
         def is_referral_text(value: Any) -> bool:
             text_value = str(value or '').lower()
@@ -1392,17 +1392,39 @@ def create_app() -> Flask:
             'backoffice_stripe_purchases',
             'select=id,firstline_company_id,company_name,admin_name,admin_email,plan_name,billing_cycle,seat_quantity,amount_total,currency,payment_status,subscription_status,account_creation_status,account_creation_error,created_at,processed_at&order=created_at.desc&limit=1200',
         )
+        billing_rows = supabase().select_many(
+            'backoffice_company_billing',
+            'select=firstline_company_id,mrr_net,arr_net,expected_mrr,expected_arr,billing_health,next_billing_date',
+        )
         with firstline_db().engine.connect() as conn:
             companies_rows = conn.execute(
                 text(
                     """
-                    SELECT c.id, c.company_name, c.contact_email, c.account_status, c.created_at
+                    WITH latest_plan AS (
+                        SELECT DISTINCT ON (cs.company_id)
+                               cs.company_id,
+                               s.name AS plan_name
+                        FROM public.company_subscription cs
+                        JOIN public.subscription s ON s.id = cs.subscription_id
+                        WHERE cs.status = 'active'
+                        ORDER BY cs.company_id, COALESCE(cs.updated_at, cs.created_at) DESC
+                    )
+                    SELECT c.id,
+                           c.company_name,
+                           c.contact_email,
+                           c.account_status,
+                           c.referred_by,
+                           c.created_at,
+                           c.updated_at,
+                           lp.plan_name
                     FROM public.company c
+                    LEFT JOIN latest_plan lp ON lp.company_id = c.id
                     ORDER BY c.created_at DESC NULLS LAST
                     """
                 )
             ).mappings().all()
         companies = rows_to_dicts(companies_rows)
+        billing_by_company = {str(item.get('firstline_company_id') or ''): item for item in billing_rows}
 
         company_by_email: dict[str, dict[str, Any]] = {}
         company_by_name: dict[str, dict[str, Any]] = {}
@@ -1505,6 +1527,45 @@ def create_app() -> Flask:
                         'lost_reason': deal.get('lost_reason'),
                         'created_at': deal.get('created_at'),
                         'updated_at': deal.get('updated_at'),
+                    }
+                )
+            )
+
+        existing_company_ids = {
+            str(item.get('firstline_company_id') or '')
+            for item in referral_items
+            if item.get('firstline_company_id')
+        }
+        for company in companies:
+            referred_by = str(company.get('referred_by') or '').strip()
+            if not referred_by:
+                continue
+            company_id = str(company.get('id') or '')
+            if company_id and company_id in existing_company_ids:
+                continue
+            account_status = str(company.get('account_status') or '').lower()
+            billing_row = billing_by_company.get(company_id, {})
+            plan_name = str(company.get('plan_name') or '').strip()
+            expected_mrr = as_float(billing_row.get('mrr_net') or billing_row.get('expected_mrr'))
+            is_converted = account_status in {'active', 'trial'} or bool(plan_name) or expected_mrr > 0
+            referral_items.append(
+                json_safe(
+                    {
+                        'id': f'company:{company_id or normalize_text(company.get("company_name"))}',
+                        'referrer_name': referrer_from_text(referred_by) or referred_by,
+                        'origin': 'company.referred_by',
+                        'referred_company': company.get('company_name'),
+                        'referred_contact': company.get('contact_email'),
+                        'stage': 'closed_won' if is_converted else 'lead',
+                        'value': expected_mrr,
+                        'is_converted': is_converted,
+                        'deal_tags': [],
+                        'firstline_company_id': company_id or None,
+                        'customer_created_at': company.get('created_at'),
+                        'customer_account_status': company.get('account_status'),
+                        'lost_reason': None,
+                        'created_at': company.get('created_at'),
+                        'updated_at': company.get('updated_at') or company.get('created_at'),
                     }
                 )
             )
