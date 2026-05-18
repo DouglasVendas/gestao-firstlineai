@@ -22,7 +22,7 @@ import { GrowthMetrics } from "@/components/dashboard/growth/GrowthMetrics";
 import { RetentionMetrics } from "@/components/dashboard/retention/RetentionMetrics";
 
 import { useSettings } from "@/hooks/useSettings";
-import React;
+import React from "react";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
@@ -115,14 +115,6 @@ export default function Index() {
               change={0}
               icon={<Wallet className="h-6 w-6" />}
               variant="warning"
-            />
-            <MetricCard
-              title="Saldo (Caixa)"
-              value={formatCurrency(current.cashBalance)}
-              change={0}
-              icon={<Wallet className="h-6 w-6" />}
-              variant="primary"
-              allowPrivacy={true}
             />
             <MetricCard
               title="Saldo (Caixa)"

@@ -9,6 +9,7 @@ export interface Invoice {
     due_date: string;
     status: 'paid' | 'pending' | 'overdue' | 'canceled';
     paid_date: string | null;
+    cash_account_id?: string | null;
     created_at: string;
     client?: {
         name: string;
@@ -21,6 +22,7 @@ export interface CreateInvoiceInput {
     due_date: string;
     status: 'paid' | 'pending' | 'overdue' | 'canceled';
     paid_date: string | null;
+    cash_account_id?: string | null;
 }
 
 export const useInvoices = () => {
@@ -56,6 +58,7 @@ export const useCreateInvoice = () => {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["invoices"] });
+            queryClient.invalidateQueries({ queryKey: ["financial_snapshot"] });
         },
     });
 };

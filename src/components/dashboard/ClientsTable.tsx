@@ -1,6 +1,7 @@
 import { MoreHorizontal, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { formatClientName } from "@/lib/clientNames";
 import { useRecentClients } from "@/hooks/useClients";
 
 const formatCurrency = (value: number) => {
@@ -72,7 +73,7 @@ export function ClientsTable() {
               const statusBadge = getStatusBadge(client.status);
               return (
                 <tr key={client.id}>
-                  <td className="font-medium">{client.name}</td>
+                  <td className="font-medium">{formatClientName(client.name)}</td>
                   <td>{client.plan?.name || "-"}</td>
                   <td className="font-mono">{formatCurrency(client.mrr)}</td>
                   <td>

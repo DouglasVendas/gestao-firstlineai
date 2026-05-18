@@ -19,6 +19,7 @@ import {
   ChevronDown,
   Activity,
   Building2,
+  BriefcaseBusiness,
   DollarSign,
   Gauge,
   Calculator,
@@ -66,6 +67,12 @@ const navigation: NavGroup[] = [
       { title: "Hub Comercial", href: "/commercial", icon: TrendingUp },
       { title: "Hub Jurídico", href: "/legal", icon: Scale },
       { title: "Clientes", href: "/clients", icon: Users },
+    ],
+  },
+  {
+    title: "Backoffice",
+    items: [
+      { title: "Painel Interno", href: "/backoffice", icon: BriefcaseBusiness },
     ],
   },
 ];

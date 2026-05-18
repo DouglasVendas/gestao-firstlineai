@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/formatters";
+import { formatClientName } from "@/lib/clientNames";
 import { startOfMonth, isSameMonth, parseISO } from "date-fns";
 
 interface RetentionMetricsProps {
@@ -181,7 +182,7 @@ export function RetentionMetrics({ currentMetric, history }: RetentionMetricsPro
                         <TableBody>
                             {cancellations.map((c) => (
                                 <TableRow key={c.id}>
-                                    <TableCell className="font-medium">{c.name}</TableCell>
+                                    <TableCell className="font-medium">{formatClientName(c.name)}</TableCell>
                                     <TableCell>{c.plan?.name}</TableCell>
                                     <TableCell className="text-destructive">-{formatCurrency(c.mrr)}</TableCell>
                                     <TableCell>{c.churn_reason || '-'}</TableCell>

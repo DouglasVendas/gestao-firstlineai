@@ -11,6 +11,13 @@ import { cn } from "@/lib/utils";
 
 export function SetupWizard() {
     const { settings, updateSettings, completeSetup, fetchSettings, isLoading } = useSettings();
+    const safeSettings = settings || {
+        company_name: "",
+        primary_color: "#0f172a",
+        business_model: "B2B_SAAS" as BusinessModel,
+        mrr_goal: 100000,
+        setup_completed: false,
+    };
     const [open, setOpen] = useState(false);
     const [step, setStep] = useState(1);
 
@@ -27,16 +34,16 @@ export function SetupWizard() {
     }, []);
 
     useEffect(() => {
-        if (!isLoading && !settings.setup_completed) {
+        if (!isLoading && !safeSettings.setup_completed) {
             setFormData({
-                company_name: settings.company_name,
-                primary_color: settings.primary_color,
-                business_model: settings.business_model,
-                mrr_goal: settings.mrr_goal,
+                company_name: safeSettings.company_name,
+                primary_color: safeSettings.primary_color,
+                business_model: safeSettings.business_model,
+                mrr_goal: safeSettings.mrr_goal,
             });
             setOpen(true);
         }
-    }, [isLoading, settings.setup_completed]);
+    }, [isLoading, safeSettings.setup_completed]);
 
     const handleNext = () => {
         if (step < 3) setStep(step + 1);
@@ -53,7 +60,7 @@ export function SetupWizard() {
         setOpen(false);
     };
 
-    if (settings.setup_completed) return null;
+    if (safeSettings.setup_completed) return null;
 
     return (
         <Dialog open={open} onOpenChange={() => { }}>

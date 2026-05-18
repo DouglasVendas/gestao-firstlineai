@@ -5,6 +5,7 @@ interface UpdateInvoiceData {
   id: string;
   status?: string;
   paid_date?: string | null;
+  cash_account_id?: string | null;
 }
 
 export const useUpdateInvoice = () => {
@@ -24,6 +25,7 @@ export const useUpdateInvoice = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["financial_snapshot"] });
     },
   });
 };

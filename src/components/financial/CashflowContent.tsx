@@ -6,6 +6,7 @@ import { TrendingUp, TrendingDown, DollarSign, Wallet, Download, Loader2, Calend
 import {
     AreaChart,
     Area,
+    Line,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -14,6 +15,8 @@ import {
     BarChart,
     Bar,
     Legend,
+    ReferenceLine,
+    ReferenceDot,
 } from "recharts";
 import { useFinancialData } from "@/contexts/FinancialContext";
 import { cn } from "@/lib/utils";
@@ -105,7 +108,7 @@ export function CashflowContent() {
                     amount: vc.amount,
                     type: 'saida',
                     date: vc.month, // vc.month is already YYYY-MM-DD from DB
-                    status: vc.status === 'pending' ? 'pending' : 'completed'
+                    status: 'completed'
                 });
             }
         });
@@ -250,7 +253,7 @@ export function CashflowContent() {
     );
 
     const chartData = useMemo(() => {
-        const map = new Map<string, { month: string, entradas: number, saidas: number, saldo: number }>();
+        const map = new Map<string, { month: string, entradas: number, saidas: number, saldo: number, saldoPositivo: number, saldoNegativo: number }>();
 
         for (let i = 5; i >= 0; i--) {
             const d = new Date(selectedMonth);
@@ -261,12 +264,16 @@ export function CashflowContent() {
                 month: format(d, 'MMM/yy', { locale: ptBR }),
                 entradas: 0,
                 saidas: 0,
-                saldo: 0
+                saldo: 0,
+                saldoPositivo: 0,
+                saldoNegativo: 0,
             });
         }
         let runningBalance = 0; // Se houver controle estrito, usar saldo prévio do Context
 
-        cashflowItems.forEach(item => {
+        const itemsAsc = [...cashflowItems].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+        itemsAsc.forEach(item => {
             if (!item.date) return;
             const mStr = item.date.substring(0, 7);
 
@@ -287,11 +294,25 @@ export function CashflowContent() {
                     entry.saidas += item.amount;
                 }
                 entry.saldo = runningBalance;
+                entry.saldoPositivo = Math.max(runningBalance, 0);
+                entry.saldoNegativo = Math.min(runningBalance, 0);
             }
         });
 
         return Array.from(map.values());
     }, [cashflowItems, selectedMonth]);
+
+    const balanceChartInsights = useMemo(() => {
+        if (!chartData.length) {
+            return { minPoint: null, maxPoint: null, finalPoint: null };
+        }
+
+        const minPoint = chartData.reduce((acc, p) => (p.saldo < acc.saldo ? p : acc), chartData[0]);
+        const maxPoint = chartData.reduce((acc, p) => (p.saldo > acc.saldo ? p : acc), chartData[0]);
+        const finalPoint = chartData[chartData.length - 1];
+
+        return { minPoint, maxPoint, finalPoint };
+    }, [chartData]);
 
 
     if (isLoading) {
@@ -374,36 +395,105 @@ export function CashflowContent() {
                 {/* Balance Evolution Chart */}
                 <Card>
                     <CardHeader>
-                        <CardTitle className="text-lg">Evolução do Saldo (6 Meses)</CardTitle>
+                        <CardTitle className="text-lg">Evolução do Saldo no Período</CardTitle>
                     </CardHeader>
                     <CardContent>
+                        <div className="grid grid-cols-1 gap-2 pb-4 sm:grid-cols-3">
+                            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+                                <p className="text-xs text-muted-foreground">Pior saldo</p>
+                                <p className="text-sm font-semibold text-destructive">
+                                    {balanceChartInsights.minPoint ? formatCurrency(balanceChartInsights.minPoint.saldo) : "R$ 0,00"}
+                                </p>
+                            </div>
+                            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+                                <p className="text-xs text-muted-foreground">Melhor saldo</p>
+                                <p className="text-sm font-semibold text-success">
+                                    {balanceChartInsights.maxPoint ? formatCurrency(balanceChartInsights.maxPoint.saldo) : "R$ 0,00"}
+                                </p>
+                            </div>
+                            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+                                <p className="text-xs text-muted-foreground">Saldo final</p>
+                                <p className={cn(
+                                    "text-sm font-semibold",
+                                    (balanceChartInsights.finalPoint?.saldo ?? 0) >= 0 ? "text-success" : "text-destructive"
+                                )}>
+                                    {balanceChartInsights.finalPoint ? formatCurrency(balanceChartInsights.finalPoint.saldo) : "R$ 0,00"}
+                                </p>
+                            </div>
+                        </div>
                         <div className="h-[300px]">
                             <ResponsiveContainer width="100%" height="100%">
                                 <AreaChart data={chartData}>
                                     <defs>
-                                        <linearGradient id="colorSaldo" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                                        <linearGradient id="colorSaldoPositivo" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.25} />
+                                            <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0.02} />
+                                        </linearGradient>
+                                        <linearGradient id="colorSaldoNegativo" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.02} />
+                                            <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0.25} />
                                         </linearGradient>
                                     </defs>
                                     <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                                     <XAxis dataKey="month" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                                    <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${v / 1000}k`} />
+                                    <YAxis tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => formatCurrency(v)} width={92} />
                                     <Tooltip
                                         contentStyle={{
                                             backgroundColor: 'hsl(var(--card))',
                                             border: '1px solid hsl(var(--border))',
                                             borderRadius: '8px',
                                         }}
-                                        formatter={(value: number) => [formatCurrency(value), 'Saldo']}
+                                        formatter={(value: number, name: string) => {
+                                            if (name === "saldo") return [formatCurrency(value), "Saldo"];
+                                            return [formatCurrency(value), ""];
+                                        }}
+                                    />
+                                    <ReferenceLine
+                                        y={0}
+                                        stroke="hsl(var(--muted-foreground))"
+                                        strokeDasharray="4 4"
+                                        label={{ value: "Ponto de equilíbrio", fill: "hsl(var(--muted-foreground))", fontSize: 11, position: "insideTopRight" }}
                                     />
                                     <Area
                                         type="monotone"
+                                        dataKey="saldoPositivo"
+                                        stroke="none"
+                                        fillOpacity={1}
+                                        fill="url(#colorSaldoPositivo)"
+                                        isAnimationActive={false}
+                                    />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="saldoNegativo"
+                                        stroke="none"
+                                        fillOpacity={1}
+                                        fill="url(#colorSaldoNegativo)"
+                                        isAnimationActive={false}
+                                    />
+                                    <Line
+                                        type="monotone"
                                         dataKey="saldo"
                                         stroke="hsl(var(--primary))"
-                                        fillOpacity={1}
-                                        fill="url(#colorSaldo)"
+                                        strokeWidth={2}
+                                        dot={false}
+                                        isAnimationActive={false}
+                                        name="saldo"
                                     />
+                                    {balanceChartInsights.minPoint && (
+                                        <ReferenceDot x={balanceChartInsights.minPoint.month} y={balanceChartInsights.minPoint.saldo} r={5} fill="hsl(var(--destructive))" stroke="hsl(var(--background))" />
+                                    )}
+                                    {balanceChartInsights.maxPoint && (
+                                        <ReferenceDot x={balanceChartInsights.maxPoint.month} y={balanceChartInsights.maxPoint.saldo} r={5} fill="hsl(var(--success))" stroke="hsl(var(--background))" />
+                                    )}
+                                    {balanceChartInsights.finalPoint && (
+                                        <ReferenceDot
+                                            x={balanceChartInsights.finalPoint.month}
+                                            y={balanceChartInsights.finalPoint.saldo}
+                                            r={5}
+                                            fill={balanceChartInsights.finalPoint.saldo >= 0 ? "hsl(var(--success))" : "hsl(var(--destructive))"}
+                                            stroke="hsl(var(--background))"
+                                        />
+                                    )}
                                 </AreaChart>
                             </ResponsiveContainer>
                         </div>

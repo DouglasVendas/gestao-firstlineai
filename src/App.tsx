@@ -23,6 +23,7 @@ import CommercialHub from "./pages/commercial/CommercialHub";
 import LegalHub from "./pages/legal/LegalHub";
 import GREBoard from "./pages/gre/GREBoard";
 import GREPillarDetail from "./pages/gre/GREPillarDetail";
+import Backoffice from "./pages/Backoffice";
 
 import { AIChat } from "@/components/AIChat";
 import { SetupWizard } from "@/components/onboarding/SetupWizard";
@@ -61,6 +62,7 @@ const App = () => (
                   <Route path="/reports" element={<Reports />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/import-data" element={<ImportData />} />
+                  <Route path="/backoffice" element={<Backoffice />} />
 
                   {/* GRE Module Routes */}
                   <Route path="/gre" element={<GREBoard />} />
@@ -73,7 +75,6 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
-          </SetupWizard>
         </TooltipProvider>
         </PageTitleProvider>
       </FinancialProvider>
