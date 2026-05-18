@@ -1836,7 +1836,135 @@ def create_app() -> Flask:
     @app.get('/internal/alerts')
     @require_internal
     def alerts():
-        return jsonify({'success': True, **firstline_db().list_alerts()})
+        base = firstline_db().list_alerts()
+        items = list(base.get('items') or [])
+
+        severity_rank = {'high': 0, 'medium': 1, 'low': 2}
+
+        def append_alert(payload: dict[str, Any]) -> None:
+            item = {
+                'company_id': payload.get('company_id'),
+                'company_name': payload.get('company_name') or 'Empresa não vinculada',
+                'account_status': payload.get('account_status') or 'unknown',
+                'plan_name': payload.get('plan_name'),
+                'max_active_users': payload.get('max_active_users'),
+                'active_users_total': payload.get('active_users_total'),
+                'analyses_30d_total': payload.get('analyses_30d_total'),
+                'alert_code': payload.get('alert_code'),
+                'severity': payload.get('severity'),
+                'message': payload.get('message'),
+                'source': payload.get('source') or 'operational',
+                'billing_health': payload.get('billing_health'),
+                'next_billing_date': payload.get('next_billing_date'),
+                'event_date': payload.get('event_date'),
+            }
+            if not item.get('alert_code') or item.get('severity') not in severity_rank:
+                return
+            items.append(json_safe(item))
+
+        try:
+            billing_rows = supabase().select_many(
+                'backoffice_company_billing',
+                'select=firstline_company_id,firstline_company_name,plan_name,billing_health,next_billing_date,contracted_seats,active_users_count_cached,updated_at',
+            )
+            for row in billing_rows:
+                health = str(row.get('billing_health') or '')
+                company_id = str(row.get('firstline_company_id') or '')
+                if not company_id:
+                    continue
+
+                if health in {'overdue', 'payment_failed'}:
+                    append_alert(
+                        {
+                            'company_id': company_id,
+                            'company_name': row.get('firstline_company_name'),
+                            'plan_name': row.get('plan_name'),
+                            'max_active_users': row.get('contracted_seats'),
+                            'active_users_total': row.get('active_users_count_cached'),
+                            'alert_code': 'BILLING_CRITICAL',
+                            'severity': 'high',
+                            'message': 'Cobrança crítica (atrasada/falha de pagamento)',
+                            'source': 'billing',
+                            'billing_health': health,
+                            'next_billing_date': row.get('next_billing_date'),
+                            'event_date': row.get('updated_at'),
+                        }
+                    )
+                elif health in {'due_soon', 'trial_expiring', 'manual_review', 'not_configured'}:
+                    append_alert(
+                        {
+                            'company_id': company_id,
+                            'company_name': row.get('firstline_company_name'),
+                            'plan_name': row.get('plan_name'),
+                            'max_active_users': row.get('contracted_seats'),
+                            'active_users_total': row.get('active_users_count_cached'),
+                            'alert_code': 'BILLING_ATTENTION',
+                            'severity': 'medium',
+                            'message': 'Cobrança requer atenção operacional',
+                            'source': 'billing',
+                            'billing_health': health,
+                            'next_billing_date': row.get('next_billing_date'),
+                            'event_date': row.get('updated_at'),
+                        }
+                    )
+
+            pending_purchases = supabase().select_many(
+                'backoffice_stripe_purchases',
+                'account_creation_status=in.(pending,failed)&select=id,firstline_company_id,company_name,plan_name,account_creation_status,account_creation_error,created_at&order=created_at.desc&limit=100',
+            )
+            for purchase in pending_purchases:
+                company_id = purchase.get('firstline_company_id')
+                status = str(purchase.get('account_creation_status') or 'pending')
+                append_alert(
+                    {
+                        'company_id': str(company_id) if company_id else None,
+                        'company_name': purchase.get('company_name') or 'Checkout Stripe sem empresa',
+                        'plan_name': purchase.get('plan_name'),
+                        'alert_code': 'STRIPE_LINK_REQUIRED',
+                        'severity': 'high' if status == 'failed' else 'medium',
+                        'message': 'Compra Stripe pendente de vínculo/criação de conta',
+                        'source': 'stripe',
+                        'event_date': purchase.get('created_at'),
+                    }
+                )
+        except Exception:
+            pass
+
+        unique: dict[str, dict[str, Any]] = {}
+        for item in items:
+            key = f"{item.get('alert_code')}::{item.get('company_id') or item.get('company_name')}"
+            current = unique.get(key)
+            if not current:
+                unique[key] = item
+                continue
+            if severity_rank.get(str(item.get('severity')), 99) < severity_rank.get(str(current.get('severity')), 99):
+                unique[key] = item
+                continue
+            current_date = parse_date(current.get('event_date') or current.get('next_billing_date'))
+            item_date = parse_date(item.get('event_date') or item.get('next_billing_date'))
+            if item_date and (not current_date or item_date > current_date):
+                unique[key] = item
+
+        merged_items = list(unique.values())
+        merged_items.sort(
+            key=lambda item: (
+                severity_rank.get(str(item.get('severity')), 99),
+                str(item.get('company_name') or '').lower(),
+            )
+        )
+        merged_items = merged_items[:300]
+
+        summary = {'high': 0, 'medium': 0, 'low': 0, 'total': len(merged_items)}
+        by_code: dict[str, int] = {}
+        for item in merged_items:
+            severity = str(item.get('severity') or '')
+            code = str(item.get('alert_code') or '')
+            if severity in summary:
+                summary[severity] += 1
+            if code:
+                by_code[code] = by_code.get(code, 0) + 1
+
+        return jsonify({'success': True, 'items': merged_items, 'summary': summary, 'by_code': by_code})
 
     @app.get('/internal/audit-log')
     @require_internal

@@ -374,9 +374,9 @@ export type AlertSummary = {
 };
 
 export type BackofficeAlert = {
-  company_id: string;
+  company_id?: string;
   company_name: string;
-  account_status: string;
+  account_status?: string;
   plan_name?: string;
   max_active_users?: number;
   active_users_total?: number;
@@ -384,6 +384,10 @@ export type BackofficeAlert = {
   alert_code: string;
   severity: 'high' | 'medium' | 'low';
   message: string;
+  source?: 'operational' | 'billing' | 'stripe' | string;
+  billing_health?: string;
+  next_billing_date?: string;
+  event_date?: string;
 };
 
 export type AuditLogItem = {

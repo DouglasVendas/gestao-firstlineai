@@ -115,6 +115,20 @@ function accountStatusLabel(value?: string) {
   return labels[(value || "").toLowerCase()] || value || "Sem status";
 }
 
+function severityLabel(value?: string) {
+  if (value === "high") return "Crítico";
+  if (value === "medium") return "Médio";
+  if (value === "low") return "Baixo";
+  return value || "-";
+}
+
+function alertSourceLabel(value?: string) {
+  if (value === "operational") return "Operacional";
+  if (value === "billing") return "Billing";
+  if (value === "stripe") return "Stripe";
+  return value || "-";
+}
+
 function planCatalogCategory(value?: string) {
   const normalized = (value || "").trim().toLowerCase();
   if (!normalized) return "no_plan";
@@ -228,6 +242,11 @@ export default function Backoffice() {
   const [isSyncingBilling, setIsSyncingBilling] = useState(false);
   const [alerts, setAlerts] = useState<BackofficeAlert[]>([]);
   const [alertsSummary, setAlertsSummary] = useState<AlertSummary>({ high: 0, medium: 0, low: 0, total: 0 });
+  const [monitorSearch, setMonitorSearch] = useState("");
+  const [monitorSeverityFilter, setMonitorSeverityFilter] = useState("all");
+  const [monitorSourceFilter, setMonitorSourceFilter] = useState("all");
+  const [monitorCodeFilter, setMonitorCodeFilter] = useState("all");
+  const [monitorSavedView, setMonitorSavedView] = useState<"all" | "critical" | "billing" | "stripe" | "limits">("all");
   const [auditLog, setAuditLog] = useState<AuditLogItem[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [backendMessage, setBackendMessage] = useState("");
@@ -289,10 +308,15 @@ export default function Backoffice() {
         setBillingSummary(response.summary || null);
       }
       if (activeSection === "monitoring") {
-        const [alertsResponse, auditResponse] = await Promise.all([backofficeApi.alerts(), backofficeApi.auditLog(1, 20)]);
+        const [alertsResponse, auditResponse, companiesRows] = await Promise.all([
+          backofficeApi.alerts(),
+          backofficeApi.auditLog(1, 20),
+          loadAllCompanies().catch(() => []),
+        ]);
         setAlerts(alertsResponse.items || []);
         setAlertsSummary(alertsResponse.summary || { high: 0, medium: 0, low: 0, total: 0 });
         setAuditLog(auditResponse.items || []);
+        if (companiesRows.length) setCompanies(companiesRows);
       }
     } finally {
       setIsLoadingData(false);
@@ -846,9 +870,92 @@ export default function Backoffice() {
       setCompanyIncompleteFilter("missing_billing");
     }
     if (view === "trial_conversion") {
-      setCompanyPlanFilter("trial");
+      setCompanyPlanFilter("professional_trial");
       setCompanyBillingFilter("due_30d");
     }
+  }
+
+  const monitorAlertCodes = useMemo(
+    () => Array.from(new Set(alerts.map((item) => item.alert_code).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [alerts],
+  );
+
+  const monitorSourceSummary = useMemo(() => {
+    return alerts.reduce(
+      (acc, item) => {
+        const source = item.source || "operational";
+        acc[source] = (acc[source] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+  }, [alerts]);
+
+  const filteredMonitoringAlerts = useMemo(() => {
+    const term = monitorSearch.trim().toLowerCase();
+    return alerts.filter((alert) => {
+      const source = alert.source || "operational";
+      const matchesSearch =
+        !term ||
+        [alert.company_name, alert.message, alert.alert_code, alert.plan_name]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      const matchesSeverity = monitorSeverityFilter === "all" || alert.severity === monitorSeverityFilter;
+      const matchesSource = monitorSourceFilter === "all" || source === monitorSourceFilter;
+      const matchesCode = monitorCodeFilter === "all" || alert.alert_code === monitorCodeFilter;
+
+      return matchesSearch && matchesSeverity && matchesSource && matchesCode;
+    });
+  }, [alerts, monitorSearch, monitorSeverityFilter, monitorSourceFilter, monitorCodeFilter]);
+
+  const monitoringByCode = useMemo(() => {
+    return filteredMonitoringAlerts.reduce((acc, alert) => {
+      const key = alert.alert_code || "OUTROS";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [filteredMonitoringAlerts]);
+
+  const monitoringSummary = useMemo(() => {
+    return filteredMonitoringAlerts.reduce(
+      (acc, alert) => {
+        acc.total += 1;
+        acc[alert.severity] += 1;
+        if ((alert.source || "operational") === "billing") acc.billing += 1;
+        if ((alert.source || "operational") === "stripe") acc.stripe += 1;
+        return acc;
+      },
+      { total: 0, high: 0, medium: 0, low: 0, billing: 0, stripe: 0 },
+    );
+  }, [filteredMonitoringAlerts]);
+
+  const topMonitoringCodes = useMemo(
+    () => Object.entries(monitoringByCode).sort((a, b) => b[1] - a[1]).slice(0, 6),
+    [monitoringByCode],
+  );
+
+  function applyMonitoringSavedView(view: "all" | "critical" | "billing" | "stripe" | "limits") {
+    setMonitorSavedView(view);
+    setMonitorSearch("");
+    setMonitorSeverityFilter("all");
+    setMonitorSourceFilter("all");
+    setMonitorCodeFilter("all");
+
+    if (view === "critical") setMonitorSeverityFilter("high");
+    if (view === "billing") setMonitorSourceFilter("billing");
+    if (view === "stripe") setMonitorSourceFilter("stripe");
+    if (view === "limits") setMonitorCodeFilter("USER_LIMIT_EXCEEDED");
+  }
+
+  function openAlertCompany(alert: BackofficeAlert) {
+    if (!alert.company_id) return;
+    const fromList = companies.find((item) => item.id === alert.company_id);
+    if (fromList) {
+      void handleOpenCompany(fromList);
+      return;
+    }
+    void handleOpenCompany({ id: alert.company_id, name: alert.company_name });
   }
 
   if (isCheckingSession) {
@@ -1190,8 +1297,123 @@ export default function Backoffice() {
         </TabsContent>
 
         <TabsContent value="monitoring" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-4"><Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Alertas</p><p className="mt-2 font-mono text-3xl font-semibold">{alertsSummary.total}</p></CardContent></Card><Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Críticos</p><p className="mt-2 font-mono text-3xl font-semibold text-destructive">{alertsSummary.high}</p></CardContent></Card><Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Médios</p><p className="mt-2 font-mono text-3xl font-semibold text-warning">{alertsSummary.medium}</p></CardContent></Card><Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Baixos</p><p className="mt-2 font-mono text-3xl font-semibold">{alertsSummary.low}</p></CardContent></Card></div>
-          <div className="grid gap-4 lg:grid-cols-2"><Card><CardHeader><CardTitle>Alertas</CardTitle></CardHeader><CardContent>{alerts.length ? alerts.map((alert) => <div key={`${alert.alert_code}-${alert.company_id}`} className="border-b border-border py-3 last:border-0"><Badge variant={alert.severity === "high" ? "destructive" : "outline"}>{alert.severity}</Badge><p className="mt-2 font-medium">{alert.message}</p><p className="text-sm text-muted-foreground">{alert.company_name}</p></div>) : <EmptyState message="Nenhum alerta no momento." />}</CardContent></Card><Card><CardHeader><CardTitle>Auditoria</CardTitle></CardHeader><CardContent>{auditLog.length ? auditLog.map((item) => <div key={item.id} className="border-b border-border py-3 last:border-0"><p className="font-medium">{item.action}</p><p className="text-sm text-muted-foreground">{fmtDate(item.created_at)} - {item.actor_email || "sistema"}</p></div>) : <EmptyState message="Nenhum evento de auditoria ainda." />}</CardContent></Card></div>
+          <div className="grid gap-4 md:grid-cols-5">
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Alertas no resultado</p><p className="mt-2 font-mono text-3xl font-semibold">{monitoringSummary.total}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Críticos</p><p className="mt-2 font-mono text-3xl font-semibold text-destructive">{monitoringSummary.high}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Médios</p><p className="mt-2 font-mono text-3xl font-semibold text-warning">{monitoringSummary.medium}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Billing</p><p className="mt-2 font-mono text-3xl font-semibold">{monitoringSummary.billing}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Stripe</p><p className="mt-2 font-mono text-3xl font-semibold">{monitoringSummary.stripe}</p></CardContent></Card>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-5">
+            <Input placeholder="Buscar por cliente, mensagem, código ou plano" value={monitorSearch} onChange={(event) => setMonitorSearch(event.target.value)} />
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={monitorSavedView} onChange={(event) => applyMonitoringSavedView(event.target.value as "all" | "critical" | "billing" | "stripe" | "limits")}>
+              <option value="all">View salva: todas</option>
+              <option value="critical">Críticos</option>
+              <option value="billing">Riscos de billing</option>
+              <option value="stripe">Pendências Stripe</option>
+              <option value="limits">Limite de usuários excedido</option>
+            </select>
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={monitorSeverityFilter} onChange={(event) => setMonitorSeverityFilter(event.target.value)}>
+              <option value="all">Severidade</option>
+              <option value="high">Crítico</option>
+              <option value="medium">Médio</option>
+              <option value="low">Baixo</option>
+            </select>
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={monitorSourceFilter} onChange={(event) => setMonitorSourceFilter(event.target.value)}>
+              <option value="all">Fonte</option>
+              <option value="operational">Operacional</option>
+              <option value="billing">Billing</option>
+              <option value="stripe">Stripe</option>
+            </select>
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={monitorCodeFilter} onChange={(event) => setMonitorCodeFilter(event.target.value)}>
+              <option value="all">Código</option>
+              {monitorAlertCodes.map((code) => <option key={code} value={code}>{code}</option>)}
+            </select>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle>Fila operacional de alertas</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {filteredMonitoringAlerts.length ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Severidade</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead>Alerta</TableHead>
+                        <TableHead>Contexto</TableHead>
+                        <TableHead>Ação</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredMonitoringAlerts.map((alert, idx) => (
+                        <TableRow key={`${alert.alert_code}-${alert.company_id || alert.company_name}-${idx}`}>
+                          <TableCell><Badge variant={alert.severity === "high" ? "destructive" : "outline"}>{severityLabel(alert.severity)}</Badge></TableCell>
+                          <TableCell className="font-medium">
+                            {alert.company_name}
+                            <p className="text-xs text-muted-foreground">{alert.plan_name || "Sem plano"}</p>
+                          </TableCell>
+                          <TableCell>
+                            {alert.message}
+                            <p className="text-xs text-muted-foreground">{alert.alert_code}</p>
+                          </TableCell>
+                          <TableCell>
+                            <p className="text-sm">{alertSourceLabel(alert.source)}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {alert.billing_health ? `Billing: ${billingHealthLabel(alert.billing_health)}` : `Status: ${accountStatusLabel(alert.account_status)}`}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Próx. cobrança: {fmtDate(alert.next_billing_date)}
+                            </p>
+                          </TableCell>
+                          <TableCell>
+                            <Button size="sm" variant="outline" disabled={!alert.company_id} onClick={() => openAlertCompany(alert)}>
+                              Ver cliente
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <EmptyState message="Nenhum alerta encontrado com esses filtros." />
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Top códigos</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {topMonitoringCodes.length ? topMonitoringCodes.map(([code, count]) => (
+                  <div key={code} className="rounded-md border border-border px-3 py-2">
+                    <p className="font-medium">{code}</p>
+                    <p className="text-xs text-muted-foreground">{count} alerta(s)</p>
+                  </div>
+                )) : <EmptyState message="Sem distribuição de códigos com os filtros atuais." />}
+                <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
+                  Base total: {alertsSummary.total} alertas · Operacional {monitorSourceSummary.operational || 0} · Billing {monitorSourceSummary.billing || 0} · Stripe {monitorSourceSummary.stripe || 0}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader><CardTitle>Auditoria recente</CardTitle></CardHeader>
+            <CardContent>
+              {auditLog.length ? auditLog.map((item) => (
+                <div key={item.id} className="border-b border-border py-3 last:border-0">
+                  <p className="font-medium">{item.action}</p>
+                  <p className="text-sm text-muted-foreground">{fmtDateTime(item.created_at)} · {item.actor_email || "sistema"}</p>
+                </div>
+              )) : <EmptyState message="Nenhum evento de auditoria ainda." />}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
