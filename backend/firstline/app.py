@@ -11,7 +11,7 @@ from decimal import Decimal
 from functools import wraps
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse
-from uuid import UUID
+from uuid import UUID, NAMESPACE_URL, uuid5
 
 import bcrypt
 import jwt
@@ -1046,6 +1046,190 @@ def create_app() -> Flask:
         )
         return {str(row.get('firstline_company_id')): row for row in rows}
 
+    def stable_uuid(*parts: str) -> str:
+        base = '|'.join(part for part in parts if part)
+        return str(uuid5(NAMESPACE_URL, f'firstline-stripe-bridge:{base}'))
+
+    def resolve_default_organization_id() -> str | None:
+        org = supabase().select_one('organizations', 'select=id&order=created_at.asc&limit=1')
+        if org and org.get('id'):
+            return str(org.get('id'))
+        return None
+
+    def resolve_cash_account_id(organization_id: str) -> str | None:
+        rows = supabase().select_many(
+            'cash_accounts',
+            f'organization_id=eq.{quote(organization_id, safe="")}&active=is.true&select=id,name,type&order=created_at.asc&limit=50',
+        )
+        if not rows:
+            return None
+        for row in rows:
+            name = str(row.get('name') or '').lower()
+            account_type = str(row.get('type') or '').lower()
+            if account_type == 'gateway' or 'stripe' in name:
+                return str(row.get('id'))
+        return str(rows[0].get('id'))
+
+    def resolve_or_create_hub_client(purchase: dict[str, Any], organization_id: str) -> dict[str, Any] | None:
+        admin_email = str(purchase.get('admin_email') or '').strip()
+        company_name = str(purchase.get('company_name') or '').strip()
+        stripe_customer_id = str(purchase.get('stripe_customer_id') or '').strip()
+        cycle = str(purchase.get('billing_cycle') or 'monthly').lower()
+        amount = float(purchase.get('amount_total') or 0)
+        created_date = parse_date(purchase.get('created_at')) or date.today()
+        payment_status = str(purchase.get('payment_status') or '').lower()
+        subscription_status = str(purchase.get('subscription_status') or '').lower()
+        account_status = 'trial' if subscription_status == 'trialing' else ('active' if payment_status == 'paid' else 'inactive')
+        mrr = amount if cycle == 'monthly' else (amount / 12 if cycle == 'yearly' else amount)
+
+        def search_by_email() -> dict[str, Any] | None:
+            if not admin_email:
+                return None
+            encoded_email = quote(admin_email, safe='')
+            return supabase().select_one(
+                'clients',
+                f'organization_id=eq.{quote(organization_id, safe="")}&email=ilike.{encoded_email}&select=*',
+            )
+
+        def search_by_name() -> dict[str, Any] | None:
+            if not company_name:
+                return None
+            encoded_name = quote(company_name, safe='')
+            rows = supabase().select_many(
+                'clients',
+                f'organization_id=eq.{quote(organization_id, safe="")}&name=ilike.*{encoded_name}*&select=*&limit=1',
+            )
+            return rows[0] if rows else None
+
+        client = search_by_email() or search_by_name()
+        payload = {
+            'organization_id': organization_id,
+            'name': company_name or admin_email or f'Cliente Stripe {stripe_customer_id or "PLG"}',
+            'email': admin_email or None,
+            'status': account_status,
+            'mrr': round(max(mrr, 0), 2),
+            'start_date': created_date.isoformat(),
+            'billing_cycle': cycle if cycle in {'monthly', 'yearly'} else 'monthly',
+            'contract_duration': 12 if cycle == 'yearly' else 1,
+            'products': ['PLG'],
+            'voluntary': True,
+        }
+
+        if client:
+            client_id = str(client.get('id'))
+            rows = supabase().update_rows('clients', f'id=eq.{quote(client_id, safe="")}', payload)
+            return rows[0] if rows else client
+
+        client_id = stable_uuid('hub-client', stripe_customer_id or admin_email or company_name or str(created_date))
+        insert_payload = {'id': client_id, **payload}
+        rows = supabase().upsert('clients', insert_payload, 'id')
+        return rows[0] if rows else supabase().select_one('clients', f'id=eq.{quote(client_id, safe="")}&select=*')
+
+    def sync_purchase_to_financial_hub(
+        purchase: dict[str, Any] | None,
+        event_type: str,
+        invoice_data: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            if not purchase:
+                return
+            organization_id = resolve_default_organization_id()
+            if not organization_id:
+                return
+
+            client = resolve_or_create_hub_client(purchase, organization_id)
+            if not client:
+                return
+
+            invoice_ref = str((invoice_data or {}).get('id') or purchase.get('stripe_invoice_id') or purchase.get('stripe_checkout_session_id') or '').strip()
+            if not invoice_ref:
+                return
+
+            amount_cents = invoice_data.get('amount_paid') if invoice_data and invoice_data.get('amount_paid') is not None else invoice_data.get('amount_due') if invoice_data else None
+            amount = round((float(amount_cents) / 100), 2) if amount_cents is not None else float(purchase.get('amount_total') or 0)
+            amount = max(amount, 0)
+
+            payment_status = str((invoice_data or {}).get('status') or purchase.get('payment_status') or '').lower()
+            explicit_paid = str(purchase.get('payment_status') or '').lower() == 'paid' or event_type == 'invoice.paid'
+            is_paid = explicit_paid or payment_status == 'paid'
+            invoice_status = 'paid' if is_paid else 'overdue' if event_type == 'invoice.payment_failed' else 'pending'
+
+            due_date = parse_date((invoice_data or {}).get('due_date'))
+            if not due_date and invoice_data and invoice_data.get('due_date'):
+                try:
+                    due_date = datetime.fromtimestamp(int(invoice_data['due_date']), tz=timezone.utc).date()
+                except Exception:
+                    due_date = None
+            if not due_date:
+                due_date = parse_date((invoice_data or {}).get('period_end')) or parse_date(purchase.get('current_period_end')) or date.today()
+
+            paid_date = date.today() if is_paid else None
+            if invoice_data and invoice_data.get('status_transitions', {}).get('paid_at'):
+                try:
+                    paid_date = datetime.fromtimestamp(int(invoice_data['status_transitions']['paid_at']), tz=timezone.utc).date()
+                except Exception:
+                    paid_date = date.today() if is_paid else None
+
+            invoice_id = stable_uuid('hub-invoice', invoice_ref)
+            invoice_payload: dict[str, Any] = {
+                'id': invoice_id,
+                'organization_id': organization_id,
+                'client_id': client.get('id'),
+                'value': amount,
+                'status': invoice_status,
+                'due_date': due_date.isoformat(),
+                'paid_date': paid_date.isoformat() if paid_date else None,
+                'cash_account_id': None,
+            }
+            invoices = supabase().upsert('invoices', invoice_payload, 'id')
+            invoice = invoices[0] if invoices else supabase().select_one('invoices', f'id=eq.{quote(invoice_id, safe="")}&select=*')
+            if not invoice:
+                return
+
+            transaction_id = stable_uuid('hub-transaction', invoice_id)
+            transaction_payload = {
+                'id': transaction_id,
+                'organization_id': organization_id,
+                'description': f"Stripe {event_type} - {(purchase.get('company_name') or client.get('name') or 'Cliente')}",
+                'category': 'Receita Stripe',
+                'amount': amount,
+                'type': 'income',
+                'status': 'paid' if is_paid else 'pending',
+                'date': (paid_date or due_date).isoformat(),
+            }
+            supabase().upsert('transactions', transaction_payload, 'id')
+
+            if not is_paid:
+                return
+
+            cash_account_id = resolve_cash_account_id(organization_id)
+            if not cash_account_id:
+                return
+
+            movement_query = (
+                f'organization_id=eq.{quote(organization_id, safe="")}'
+                f'&source_type=eq.invoice'
+                f'&source_id=eq.{quote(invoice_id, safe="")}'
+                f'&select=id'
+            )
+            existing_movement = supabase().select_one('cash_movements', movement_query)
+            movement_payload = {
+                'organization_id': organization_id,
+                'cash_account_id': cash_account_id,
+                'movement_type': 'income',
+                'amount': amount,
+                'movement_date': (paid_date or date.today()).isoformat(),
+                'description': f"Recebimento Stripe {invoice_ref}",
+                'source_type': 'invoice',
+                'source_id': invoice_id,
+            }
+            if existing_movement and existing_movement.get('id'):
+                supabase().update_rows('cash_movements', f'id=eq.{quote(str(existing_movement.get("id")), safe="")}', movement_payload)
+            else:
+                supabase().insert('cash_movements', movement_payload)
+        except Exception:
+            return
+
     def billing_payload_from_company(company: dict[str, Any], actor_email: str | None = None) -> dict[str, Any]:
         cycle = 'trial' if company.get('payment_type') == 'trial' else 'monthly'
         active_users = int(company.get('active_users_count') or 0)
@@ -1565,14 +1749,27 @@ def create_app() -> Flask:
                     'created_by': 'stripe_webhook',
                 },
             )
+        if purchase:
+            sync_purchase_to_financial_hub(purchase, 'checkout.session.completed')
         return purchase
 
-    def update_purchase_by_subscription(subscription: dict[str, Any], payment_status: str | None = None, invoice_id: str | None = None) -> None:
+    def update_purchase_by_subscription(
+        subscription: dict[str, Any],
+        payment_status: str | None = None,
+        invoice_id: str | None = None,
+        event_type: str = 'customer.subscription.updated',
+        invoice_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         sub_payload = subscription_payload(subscription)
         subscription_id = sub_payload.get('stripe_subscription_id')
         if not subscription_id:
-            return
+            return None
         existing = supabase().select_one('backoffice_stripe_purchases', f'stripe_subscription_id=eq.{quote(subscription_id, safe="")}&select=*')
+        if not existing and subscription.get('customer'):
+            existing = supabase().select_one(
+                'backoffice_stripe_purchases',
+                f'stripe_customer_id=eq.{quote(str(subscription.get("customer")), safe="")}&select=*&order=created_at.desc&limit=1',
+            )
         payload = {
             'subscription_status': sub_payload.get('subscription_status'),
             'current_period_start': sub_payload.get('current_period_start'),
@@ -1583,7 +1780,7 @@ def create_app() -> Flask:
             'processed_at': datetime.now(timezone.utc).isoformat(),
         }
         if existing:
-            supabase().update_rows('backoffice_stripe_purchases', f'stripe_subscription_id=eq.{quote(subscription_id, safe="")}', payload)
+            supabase().update_rows('backoffice_stripe_purchases', f'id=eq.{quote(str(existing.get("id")), safe="")}', payload)
             company_id = existing.get('firstline_company_id')
             if company_id:
                 health = 'ok' if payment_status in {'paid', None} and sub_payload.get('subscription_status') in {'active', 'trialing'} else 'payment_failed'
@@ -1600,6 +1797,10 @@ def create_app() -> Flask:
                         'updated_by': 'stripe_webhook',
                     },
                 )
+            updated_purchase = supabase().select_one('backoffice_stripe_purchases', f'id=eq.{quote(str(existing.get("id")), safe="")}&select=*')
+            sync_purchase_to_financial_hub(updated_purchase or existing, event_type, invoice_data)
+            return updated_purchase or existing
+        return None
 
     def public_user(row: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -1726,6 +1927,8 @@ def create_app() -> Flask:
                         subscription or {'id': subscription_id},
                         payment_status='paid' if event_type == 'invoice.paid' else 'failed',
                         invoice_id=event_object.get('id'),
+                        event_type=event_type,
+                        invoice_data=event_object,
                     )
                 supabase().update_rows(
                     'backoffice_stripe_events',
@@ -1733,7 +1936,7 @@ def create_app() -> Flask:
                     {'processing_status': 'processed', 'processed_at': datetime.now(timezone.utc).isoformat()},
                 )
             elif event_type in {'customer.subscription.updated', 'customer.subscription.deleted'}:
-                update_purchase_by_subscription(event_object)
+                update_purchase_by_subscription(event_object, event_type=event_type)
                 supabase().update_rows(
                     'backoffice_stripe_events',
                     f'stripe_event_id=eq.{quote(event_id, safe="")}',
