@@ -250,6 +250,37 @@ class FirstlineDb:
                         JOIN public.users u ON u.id = uc.user_id
                         GROUP BY uc.company_id
                     ),
+                    company_analytics_agg AS (
+                        SELECT uc.company_id,
+                               count(a.id) AS analyses_total,
+                               count(a.id) FILTER (WHERE a.created_at >= now() - interval '7 days') AS analyses_7d,
+                               count(a.id) FILTER (WHERE a.created_at >= now() - interval '30 days') AS analyses_30d,
+                               count(DISTINCT a.user_id) FILTER (WHERE a.created_at >= now() - interval '30 days') AS users_with_analyses_30d,
+                               max(a.created_at) AS last_analysis_at,
+                               avg(a.score_geral) AS avg_score_geral
+                        FROM public.user_company uc
+                        LEFT JOIN public.analyses a ON a.user_id = uc.user_id
+                        GROUP BY uc.company_id
+                    ),
+                    company_monthly_usage AS (
+                        SELECT company_id,
+                               COALESCE(max(analyses_count) FILTER (WHERE month_rank = 1), 0) AS analyses_current_month,
+                               COALESCE(max(analyses_count) FILTER (WHERE month_rank = 2), 0) AS analyses_previous_month
+                        FROM (
+                            SELECT uc.company_id,
+                                   date_trunc('month', a.created_at) AS usage_month,
+                                   count(a.id) AS analyses_count,
+                                   dense_rank() OVER (
+                                       PARTITION BY uc.company_id
+                                       ORDER BY date_trunc('month', a.created_at) DESC
+                                   ) AS month_rank
+                            FROM public.user_company uc
+                            JOIN public.analyses a ON a.user_id = uc.user_id
+                            GROUP BY uc.company_id, date_trunc('month', a.created_at)
+                        ) ranked_usage
+                        WHERE month_rank <= 2
+                        GROUP BY company_id
+                    ),
                     latest_plan AS (
                         SELECT DISTINCT ON (cs.company_id)
                                cs.company_id,
@@ -267,6 +298,14 @@ class FirstlineDb:
                            c.max_active_users,
                            COALESCE(cua.users_count, 0) AS users_count,
                            COALESCE(cua.active_users_count, 0) AS active_users_count,
+                           COALESCE(caa.analyses_total, 0) AS analyses_total,
+                           COALESCE(caa.analyses_7d, 0) AS analyses_7d,
+                           COALESCE(caa.analyses_30d, 0) AS analyses_30d,
+                           COALESCE(caa.users_with_analyses_30d, 0) AS users_with_analyses_30d,
+                           caa.last_analysis_at,
+                           COALESCE(caa.avg_score_geral, 0) AS avg_score_geral,
+                           COALESCE(cmu.analyses_current_month, 0) AS analyses_current_month,
+                           COALESCE(cmu.analyses_previous_month, 0) AS analyses_previous_month,
                            lp.subscription_status,
                            lp.expiration_date,
                            s.id AS plan_id,
@@ -274,6 +313,8 @@ class FirstlineDb:
                            s.payment_type AS plan_payment_type
                     FROM public.company c
                     LEFT JOIN company_users_agg cua ON cua.company_id = c.id
+                    LEFT JOIN company_analytics_agg caa ON caa.company_id = c.id
+                    LEFT JOIN company_monthly_usage cmu ON cmu.company_id = c.id
                     LEFT JOIN latest_plan lp ON lp.company_id = c.id
                     LEFT JOIN public.subscription s ON s.id = lp.subscription_id
                     {where}
@@ -485,6 +526,22 @@ class FirstlineDb:
             'pagination': {'page': page, 'page_size': page_size, 'total': int(total)},
             'summary': json_safe(dict(summary or {})),
         }
+
+    def list_company_audit_log(self, company_id: str, page_size: int = 30) -> list[dict[str, Any]]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, actor_email, action, entity_type, entity_id, reason, created_at
+                    FROM public.backoffice_audit_log
+                    WHERE entity_id = :company_id
+                    ORDER BY created_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {'company_id': company_id, 'limit': page_size},
+            ).mappings().all()
+        return rows_to_dicts(rows)
 
     def list_plans(self) -> list[dict[str, Any]]:
         with self.engine.connect() as conn:
@@ -1297,10 +1354,114 @@ def create_app() -> Flask:
     @app.get('/internal/companies/<string:company_id>')
     @require_internal
     def get_company(company_id: str):
-        company = firstline_db().get_company(company_id)
+        db = firstline_db()
+        company = db.get_company(company_id)
         if not company:
             return jsonify({'success': False, 'error': 'Empresa não encontrada'}), 404
-        return jsonify({'success': True, 'company': company})
+        encoded_company_id = quote(company_id, safe='')
+
+        billing = supabase().select_one(
+            'backoffice_company_billing',
+            f'firstline_company_id=eq.{encoded_company_id}&select=*',
+        )
+        billing_events = supabase().select_many(
+            'backoffice_billing_events',
+            f'firstline_company_id=eq.{encoded_company_id}&select=*&order=event_date.desc&limit=50',
+        )
+        stripe_events = supabase().select_many(
+            'backoffice_stripe_events',
+            f'firstline_company_id=eq.{encoded_company_id}&select=id,stripe_event_id,event_type,stripe_object_id,processing_status,error_message,created_at,processed_at&order=created_at.desc&limit=30',
+        )
+        stripe_purchases = supabase().select_many(
+            'backoffice_stripe_purchases',
+            f'firstline_company_id=eq.{encoded_company_id}&select=*&order=created_at.desc&limit=30',
+        )
+
+        stripe_customer_id = billing.get('stripe_customer_id') if billing else None
+        if stripe_customer_id:
+            encoded_customer_id = quote(str(stripe_customer_id), safe='')
+            purchases_by_customer = supabase().select_many(
+                'backoffice_stripe_purchases',
+                f'stripe_customer_id=eq.{encoded_customer_id}&select=*&order=created_at.desc&limit=30',
+            )
+            existing_ids = {str(item.get('id')) for item in stripe_purchases}
+            for purchase in purchases_by_customer:
+                if str(purchase.get('id')) not in existing_ids:
+                    stripe_purchases.append(purchase)
+
+        alerts_payload = db.list_alerts()
+        alerts = [item for item in alerts_payload.get('items', []) if str(item.get('company_id')) == company_id]
+        audit_log = db.list_company_audit_log(company_id, 30)
+
+        analytics = company.get('analytics') or {}
+        analyses_current_month = int(company.get('analyses_by_month', [{}])[0].get('analyses_count') or 0) if company.get('analyses_by_month') else 0
+        analyses_previous_month = int(company.get('analyses_by_month', [{}, {}])[1].get('analyses_count') or 0) if len(company.get('analyses_by_month') or []) > 1 else 0
+
+        score = 100
+        account_status = str(company.get('account_status') or 'active').lower()
+        if account_status != 'active':
+            score -= 30
+        billing_health = str((billing or {}).get('billing_health') or '')
+        if billing_health in {'overdue', 'payment_failed'}:
+            score -= 35
+        elif billing_health in {'due_soon', 'trial_expiring', 'manual_review', 'not_configured'}:
+            score -= 15
+        analyses_30d = int(analytics.get('analyses_30d') or 0)
+        if analyses_30d <= 0:
+            score -= 25
+        elif analyses_30d < 5:
+            score -= 10
+        if analyses_previous_month > 0 and analyses_current_month < int(analyses_previous_month * 0.5):
+            score -= 15
+        active_users = int(company.get('active_users_count') or 0)
+        max_active_users = int(company.get('max_active_users') or 0)
+        if max_active_users > 0 and active_users > max_active_users:
+            score -= 10
+        score = max(0, min(100, score))
+
+        if score >= 75:
+            health_label = 'saudavel'
+        elif score >= 45:
+            health_label = 'atencao'
+        else:
+            health_label = 'critico'
+
+        next_actions: list[str] = []
+        if billing_health in {'overdue', 'payment_failed'}:
+            next_actions.append('Cobrar cliente')
+        if billing_health in {'due_soon', 'trial_expiring'}:
+            next_actions.append('Renovar contrato')
+        if max_active_users > 0 and active_users > max_active_users:
+            next_actions.append('Ajustar limite de usuarios')
+        if active_users >= max(max_active_users, 1) and analyses_30d > 30:
+            next_actions.append('Fazer upsell')
+        if analyses_30d <= 0 and account_status == 'active':
+            next_actions.append('Ativar onboarding')
+        if account_status in {'suspended', 'blocked'}:
+            next_actions.append('Revisar manualmente')
+        if not next_actions:
+            next_actions.append('Sem acao imediata')
+
+        company['health'] = {
+            'score': score,
+            'label': health_label,
+            'next_actions': next_actions,
+            'analyses_current_month': analyses_current_month,
+            'analyses_previous_month': analyses_previous_month,
+        }
+
+        return jsonify(
+            {
+                'success': True,
+                'company': company,
+                'billing': billing,
+                'billing_events': billing_events,
+                'stripe_events': stripe_events,
+                'stripe_purchases': stripe_purchases,
+                'alerts': alerts,
+                'audit_log': audit_log,
+            }
+        )
 
     @app.patch('/internal/companies/<string:company_id>/status')
     @require_internal

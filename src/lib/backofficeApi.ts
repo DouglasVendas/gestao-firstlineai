@@ -38,6 +38,36 @@ export const backofficeApi = {
       `/internal/companies?page=${page}&page_size=${pageSize}`,
     );
   },
+  company(companyId: string) {
+    return request<{
+      success: boolean;
+      company: CompanyDetail;
+      billing: BillingCompany | null;
+      billing_events: BillingEvent[];
+      stripe_events: StripeEvent[];
+      stripe_purchases: StripePurchase[];
+      alerts: BackofficeAlert[];
+      audit_log: AuditLogItem[];
+    }>(`/internal/companies/${companyId}`);
+  },
+  updateCompanyStatus(companyId: string, payload: { status: string; reason?: string }) {
+    return request<{ success: boolean; company: CompanyDetail }>(`/internal/companies/${companyId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  updateCompanySubscription(companyId: string, payload: { subscription_id: string; expiration_date?: string | null; reason?: string }) {
+    return request<{ success: boolean; company: CompanyDetail }>(`/internal/companies/${companyId}/subscription`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  updateCompanyLimits(companyId: string, payload: { monthly_analysis_limit?: number | null; max_active_users?: number | null; reason?: string }) {
+    return request<{ success: boolean; company: CompanyDetail }>(`/internal/companies/${companyId}/limits`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
   users(page = 1, pageSize = 50, search = '') {
     const encodedSearch = encodeURIComponent(search);
     return request<{ success: boolean; items: CompanyUserLink[]; pagination: Pagination; summary: UsersSummary; message?: string }>(
@@ -100,6 +130,66 @@ export type Company = {
   plan_name?: string;
   plan_payment_type?: string;
   expiration_date?: string;
+  monthly_analysis_limit?: number | null;
+  max_active_users?: number | null;
+  analyses_total?: number;
+  analyses_7d?: number;
+  analyses_30d?: number;
+  users_with_analyses_30d?: number;
+  last_analysis_at?: string;
+  avg_score_geral?: number;
+  analyses_current_month?: number;
+  analyses_previous_month?: number;
+};
+
+export type CompanyDetail = Company & {
+  plan_id?: string;
+  subscription_status?: string;
+  subscriptions?: Array<{
+    id: string;
+    subscription_id: string;
+    plan_name?: string;
+    payment_type?: string;
+    status?: string;
+    expiration_date?: string;
+    created_at?: string;
+    updated_at?: string;
+  }>;
+  users?: Array<{
+    id: string;
+    name?: string;
+    email?: string;
+    phone?: string;
+    status?: string;
+    role?: string;
+    seller_type?: string;
+    linked_at?: string;
+    calendar_connected?: boolean;
+    microsoft_calendar_connected?: boolean;
+    analyses_count?: number;
+    analyses_30d?: number;
+    last_analysis_at?: string;
+    avg_score_geral?: number;
+  }>;
+  analytics?: {
+    analyses_total?: number;
+    analyses_30d?: number;
+    analyses_7d?: number;
+    users_with_analyses?: number;
+    last_analysis_at?: string;
+    avg_score_geral?: number;
+  };
+  analyses_by_month?: Array<{
+    month: string;
+    analyses_count: number;
+  }>;
+  health?: {
+    score?: number;
+    label?: string;
+    next_actions?: string[];
+    analyses_current_month?: number;
+    analyses_previous_month?: number;
+  };
 };
 
 export type CompanyUserLink = {
@@ -178,6 +268,56 @@ export type BillingCompany = {
   is_configured?: boolean;
   firstline_plan_name?: string;
   firstline_unit_price?: number;
+};
+
+export type BillingEvent = {
+  id: string;
+  billing_id?: string;
+  firstline_company_id?: string;
+  event_type: string;
+  event_source?: string;
+  amount?: number;
+  currency?: string;
+  event_date?: string;
+  description?: string;
+  before_data?: Record<string, unknown> | null;
+  after_data?: Record<string, unknown> | null;
+  created_by?: string;
+  created_at?: string;
+};
+
+export type StripeEvent = {
+  id: string;
+  stripe_event_id?: string;
+  event_type: string;
+  stripe_object_id?: string;
+  processing_status?: string;
+  error_message?: string;
+  created_at?: string;
+  processed_at?: string;
+};
+
+export type StripePurchase = {
+  id: string;
+  stripe_checkout_session_id?: string;
+  stripe_customer_id?: string;
+  stripe_subscription_id?: string;
+  stripe_invoice_id?: string;
+  firstline_company_id?: string;
+  plan_name?: string;
+  billing_cycle?: string;
+  seat_quantity?: number;
+  amount_total?: number;
+  currency?: string;
+  payment_status?: string;
+  subscription_status?: string;
+  account_creation_status?: string;
+  account_creation_error?: string;
+  company_name?: string;
+  admin_name?: string;
+  admin_email?: string;
+  created_at?: string;
+  processed_at?: string;
 };
 
 export type AlertSummary = {

@@ -1,7 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Building2, CreditCard, Database, Loader2, Lock, RefreshCw, ShieldCheck, Users } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  Building2,
+  CreditCard,
+  Database,
+  Loader2,
+  Lock,
+  RefreshCw,
+  ShieldCheck,
+  Users,
+  TrendingUp,
+  CalendarClock,
+  CircleDollarSign,
+} from "lucide-react";
 import { usePageTitle } from "@/contexts/PageTitleContext";
-import { backofficeApi, type AlertSummary, type AuditLogItem, type BackofficeAlert, type BillingCompany, type BillingSummary, type Company, type CompanyUserLink, type InternalUser, type Plan, type UsersSummary } from "@/lib/backofficeApi";
+import {
+  backofficeApi,
+  type AlertSummary,
+  type AuditLogItem,
+  type BackofficeAlert,
+  type BillingCompany,
+  type BillingEvent,
+  type BillingSummary,
+  type Company,
+  type CompanyDetail,
+  type CompanyUserLink,
+  type InternalUser,
+  type Plan,
+  type StripeEvent,
+  type StripePurchase,
+  type UsersSummary,
+} from "@/lib/backofficeApi";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,16 +40,39 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/formatters";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useToast } from "@/hooks/use-toast";
 
 const defaultEmail = "douglasvslopes@gmail.com";
-const pageSize = 50;
+const pageSize = 100;
 type Section = "companies" | "users" | "plans" | "finance" | "monitoring";
+type SavedView =
+  | "all"
+  | "risk"
+  | "renew_30d"
+  | "payment_issues"
+  | "upsell"
+  | "missing_config"
+  | "trial_conversion";
 
-function fmtDate(value?: string) {
+function fmtDate(value?: string | null) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return new Intl.DateTimeFormat("pt-BR").format(date);
+}
+
+function fmtDateTime(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function calendarLabel(google?: boolean, microsoft?: boolean) {
@@ -53,12 +106,52 @@ function billingHealthLabel(value?: string) {
   return labels[value || ""] || value || "-";
 }
 
+function accountStatusLabel(value?: string) {
+  const labels: Record<string, string> = {
+    active: "Ativo",
+    inactive: "Inativo",
+    suspended: "Suspenso",
+    blocked: "Bloqueado",
+    trial: "Trial",
+  };
+  return labels[(value || "").toLowerCase()] || value || "Sem status";
+}
+
 function EmptyState({ message }: { message: string }) {
   return <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">{message}</div>;
 }
 
+type CompanyWithSignals = Company & {
+  billing?: BillingCompany | null;
+  alerts?: BackofficeAlert[];
+  healthLabel: "saudavel" | "atencao" | "critico";
+  healthScore: number;
+  billingStatus: string;
+  renewalInDays: number | null;
+  usageDrop: boolean;
+  upsellOpportunity: boolean;
+  incomplete: {
+    cnpj: boolean;
+    email: boolean;
+    phone: boolean;
+    plan: boolean;
+    billing: boolean;
+  };
+};
+
+function MetricTile({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="rounded-lg border border-border/70 bg-muted/20 p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-2 font-mono text-2xl font-semibold">{value}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
+
 export default function Backoffice() {
   const { setPageTitle } = usePageTitle();
+  const { toast } = useToast();
   const [section, setSection] = useState<Section>("companies");
   const [email, setEmail] = useState(defaultEmail);
   const [password, setPassword] = useState("");
@@ -72,10 +165,42 @@ export default function Backoffice() {
   const [companySearch, setCompanySearch] = useState("");
   const [companyStatusFilter, setCompanyStatusFilter] = useState("all");
   const [companyPlanFilter, setCompanyPlanFilter] = useState("all");
-  const [companySortBy, setCompanySortBy] = useState<"name" | "plan" | "users" | "created_at" | "status">("name");
+  const [companyBillingFilter, setCompanyBillingFilter] = useState("all");
+  const [companyUsageFilter, setCompanyUsageFilter] = useState("all");
+  const [companyRiskFilter, setCompanyRiskFilter] = useState("all");
+  const [companyCommercialFilter, setCompanyCommercialFilter] = useState("all");
+  const [companyIncompleteFilter, setCompanyIncompleteFilter] = useState("all");
+  const [companySavedView, setCompanySavedView] = useState<SavedView>("all");
+  const [companySortBy, setCompanySortBy] = useState<"name" | "plan" | "users" | "created_at" | "status" | "mrr" | "usage">("name");
   const [companySortDirection, setCompanySortDirection] = useState<"asc" | "desc">("asc");
   const [companyPage, setCompanyPage] = useState(1);
+
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [companyDetail, setCompanyDetail] = useState<CompanyDetail | null>(null);
+  const [companyBilling, setCompanyBilling] = useState<BillingCompany | null>(null);
+  const [companyBillingEvents, setCompanyBillingEvents] = useState<BillingEvent[]>([]);
+  const [companyStripeEvents, setCompanyStripeEvents] = useState<StripeEvent[]>([]);
+  const [companyStripePurchases, setCompanyStripePurchases] = useState<StripePurchase[]>([]);
+  const [companyAlerts, setCompanyAlerts] = useState<BackofficeAlert[]>([]);
+  const [companyAuditLog, setCompanyAuditLog] = useState<AuditLogItem[]>([]);
+  const [isLoadingCompanyDetail, setIsLoadingCompanyDetail] = useState(false);
+  const [statusForm, setStatusForm] = useState({ status: "active", reason: "" });
+  const [planForm, setPlanForm] = useState({ subscriptionId: "", expirationDate: "", reason: "" });
+  const [limitsForm, setLimitsForm] = useState({ maxActiveUsers: "", monthlyAnalysisLimit: "", reason: "" });
+  const [billingForm, setBillingForm] = useState({
+    contractedSeats: "",
+    unitPrice: "",
+    billingCycle: "monthly",
+    discountType: "none",
+    discountValue: "",
+    discountExpiresAt: "",
+    reason: "",
+  });
+  const [isSavingStatus, setIsSavingStatus] = useState(false);
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
+  const [isSavingLimits, setIsSavingLimits] = useState(false);
+  const [isSavingBilling, setIsSavingBilling] = useState(false);
+
   const [usersLinks, setUsersLinks] = useState<CompanyUserLink[]>([]);
   const [usersSummary, setUsersSummary] = useState<UsersSummary | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -92,6 +217,21 @@ export default function Backoffice() {
     setPageTitle("Backoffice", "Operação interna FirstLine AI");
   }, [setPageTitle]);
 
+  async function loadAllCompanies() {
+    let page = 1;
+    let total = 1;
+    const items: Company[] = [];
+
+    while (items.length < total && page <= 20) {
+      const response = await backofficeApi.companies(page, pageSize);
+      total = response.pagination.total || 0;
+      items.push(...(response.items || []));
+      page += 1;
+    }
+
+    return items;
+  }
+
   async function loadData(activeSection = section) {
     setIsLoadingData(true);
     setBackendMessage("");
@@ -100,9 +240,24 @@ export default function Backoffice() {
       setHealth({ database: healthResponse.database, tables: healthResponse.tables });
 
       if (activeSection === "companies") {
-        const response = await backofficeApi.companies(1, pageSize);
-        setCompanies(response.items || []);
-        setBackendMessage(response.message || "");
+        const [companiesRows, billingResponse, alertsResponse, plansResponse] = await Promise.all([
+          loadAllCompanies(),
+          backofficeApi.billingOverview().catch(() => null),
+          backofficeApi.alerts().catch(() => null),
+          backofficeApi.plans().catch(() => null),
+        ]);
+        setCompanies(companiesRows);
+        if (billingResponse) {
+          setBillingItems(billingResponse.items || []);
+          setBillingSummary(billingResponse.summary || null);
+        }
+        if (alertsResponse) {
+          setAlerts(alertsResponse.items || []);
+          setAlertsSummary(alertsResponse.summary || { high: 0, medium: 0, low: 0, total: 0 });
+        }
+        if (plansResponse) {
+          setPlans(plansResponse.plans || []);
+        }
       }
       if (activeSection === "users") {
         const response = await backofficeApi.users(1, pageSize);
@@ -178,17 +333,309 @@ export default function Backoffice() {
     }
   }
 
+  async function refreshSelectedCompany(companyId: string) {
+    const detail = await backofficeApi.company(companyId);
+    setCompanyDetail(detail.company || null);
+    setCompanyBilling(detail.billing || null);
+    setCompanyBillingEvents(detail.billing_events || []);
+    setCompanyStripeEvents(detail.stripe_events || []);
+    setCompanyStripePurchases(detail.stripe_purchases || []);
+    setCompanyAlerts(detail.alerts || []);
+    setCompanyAuditLog(detail.audit_log || []);
+  }
+
+  async function handleOpenCompany(company: Company) {
+    setSelectedCompany(company);
+    setIsLoadingCompanyDetail(true);
+    try {
+      await refreshSelectedCompany(company.id);
+    } catch (err) {
+      setBackendMessage(err instanceof Error ? err.message : "Falha ao carregar detalhe da empresa");
+    } finally {
+      setIsLoadingCompanyDetail(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!companyDetail) return;
+    setStatusForm({
+      status: String(companyDetail.account_status || "active").toLowerCase(),
+      reason: "",
+    });
+    setPlanForm({
+      subscriptionId: companyDetail.plan_id || "",
+      expirationDate: companyDetail.expiration_date ? String(companyDetail.expiration_date).slice(0, 10) : "",
+      reason: "",
+    });
+    setLimitsForm({
+      maxActiveUsers: companyDetail.max_active_users !== undefined && companyDetail.max_active_users !== null ? String(companyDetail.max_active_users) : "",
+      monthlyAnalysisLimit: companyDetail.monthly_analysis_limit !== undefined && companyDetail.monthly_analysis_limit !== null ? String(companyDetail.monthly_analysis_limit) : "",
+      reason: "",
+    });
+  }, [companyDetail]);
+
+  useEffect(() => {
+    setBillingForm({
+      contractedSeats: companyBilling?.contracted_seats !== undefined && companyBilling?.contracted_seats !== null ? String(companyBilling.contracted_seats) : "",
+      unitPrice: companyBilling?.unit_price !== undefined && companyBilling?.unit_price !== null ? String(companyBilling.unit_price) : "",
+      billingCycle: companyBilling?.billing_cycle || "monthly",
+      discountType: companyBilling?.discount_type || "none",
+      discountValue: companyBilling?.discount_value !== undefined && companyBilling?.discount_value !== null ? String(companyBilling.discount_value) : "",
+      discountExpiresAt: companyBilling?.discount_expires_at ? String(companyBilling.discount_expires_at).slice(0, 10) : "",
+      reason: "",
+    });
+  }, [companyBilling]);
+
+  async function handleSaveStatus() {
+    if (!selectedCompany) return;
+    setIsSavingStatus(true);
+    try {
+      await backofficeApi.updateCompanyStatus(selectedCompany.id, {
+        status: statusForm.status,
+        reason: statusForm.reason || undefined,
+      });
+      await Promise.all([refreshSelectedCompany(selectedCompany.id), loadData("companies")]);
+      setStatusForm((prev) => ({ ...prev, reason: "" }));
+      toast({ title: "Status atualizado", description: "Status da empresa salvo com sucesso." });
+    } catch (err) {
+      toast({ variant: "destructive", title: "Falha ao atualizar status", description: err instanceof Error ? err.message : "Erro inesperado" });
+    } finally {
+      setIsSavingStatus(false);
+    }
+  }
+
+  async function handleSavePlan() {
+    if (!selectedCompany || !planForm.subscriptionId) return;
+    setIsSavingPlan(true);
+    try {
+      await backofficeApi.updateCompanySubscription(selectedCompany.id, {
+        subscription_id: planForm.subscriptionId,
+        expiration_date: planForm.expirationDate || null,
+        reason: planForm.reason || undefined,
+      });
+      await Promise.all([refreshSelectedCompany(selectedCompany.id), loadData("companies")]);
+      setPlanForm((prev) => ({ ...prev, reason: "" }));
+      toast({ title: "Plano atualizado", description: "Plano da empresa atualizado no backoffice." });
+    } catch (err) {
+      toast({ variant: "destructive", title: "Falha ao atualizar plano", description: err instanceof Error ? err.message : "Erro inesperado" });
+    } finally {
+      setIsSavingPlan(false);
+    }
+  }
+
+  async function handleSaveLimits() {
+    if (!selectedCompany) return;
+    setIsSavingLimits(true);
+    try {
+      await backofficeApi.updateCompanyLimits(selectedCompany.id, {
+        max_active_users: limitsForm.maxActiveUsers === "" ? null : Number(limitsForm.maxActiveUsers),
+        monthly_analysis_limit: limitsForm.monthlyAnalysisLimit === "" ? null : Number(limitsForm.monthlyAnalysisLimit),
+        reason: limitsForm.reason || undefined,
+      });
+      await Promise.all([refreshSelectedCompany(selectedCompany.id), loadData("companies")]);
+      setLimitsForm((prev) => ({ ...prev, reason: "" }));
+      toast({ title: "Limites atualizados", description: "Limites operacionais atualizados." });
+    } catch (err) {
+      toast({ variant: "destructive", title: "Falha ao atualizar limites", description: err instanceof Error ? err.message : "Erro inesperado" });
+    } finally {
+      setIsSavingLimits(false);
+    }
+  }
+
+  async function handleSaveBilling() {
+    if (!selectedCompany) return;
+    setIsSavingBilling(true);
+    try {
+      await backofficeApi.updateBilling(selectedCompany.id, {
+        contracted_seats: billingForm.contractedSeats === "" ? undefined : Number(billingForm.contractedSeats),
+        unit_price: billingForm.unitPrice === "" ? undefined : Number(billingForm.unitPrice),
+        billing_cycle: billingForm.billingCycle as BillingCompany["billing_cycle"],
+        discount_type: billingForm.discountType as BillingCompany["discount_type"],
+        discount_value: billingForm.discountValue === "" ? 0 : Number(billingForm.discountValue),
+        discount_expires_at: billingForm.discountExpiresAt || null,
+        reason: billingForm.reason || undefined,
+      });
+      await Promise.all([refreshSelectedCompany(selectedCompany.id), loadData("companies")]);
+      setBillingForm((prev) => ({ ...prev, reason: "" }));
+      toast({ title: "Billing atualizado", description: "Parâmetros financeiros salvos com sucesso." });
+    } catch (err) {
+      toast({ variant: "destructive", title: "Falha ao atualizar billing", description: err instanceof Error ? err.message : "Erro inesperado" });
+    } finally {
+      setIsSavingBilling(false);
+    }
+  }
+
+  const billingByCompany = useMemo(() => {
+    const map = new Map<string, BillingCompany>();
+    billingItems.forEach((item) => map.set(String(item.firstline_company_id), item));
+    return map;
+  }, [billingItems]);
+
+  const alertsByCompany = useMemo(() => {
+    const map = new Map<string, BackofficeAlert[]>();
+    alerts.forEach((item) => {
+      const key = String(item.company_id);
+      const current = map.get(key) || [];
+      current.push(item);
+      map.set(key, current);
+    });
+    return map;
+  }, [alerts]);
+
+  const companiesWithSignals = useMemo<CompanyWithSignals[]>(() => {
+    return companies.map((company) => {
+      const billing = billingByCompany.get(company.id) || null;
+      const companyAlerts = alertsByCompany.get(company.id) || [];
+      const analyses30 = Number(company.analyses_30d || 0);
+      const analysesCurrent = Number(company.analyses_current_month || 0);
+      const analysesPrevious = Number(company.analyses_previous_month || 0);
+      const usageDrop = analysesPrevious > 0 && analysesCurrent < analysesPrevious * 0.5;
+      const activeUsers = Number(company.active_users_count || 0);
+      const contracted = Number(billing?.contracted_seats || company.max_active_users || 0);
+
+      let healthScore = 100;
+      const accountStatus = String(company.account_status || "active").toLowerCase();
+      if (accountStatus !== "active") healthScore -= 30;
+      const billingHealth = String(billing?.billing_health || "not_configured");
+      if (["overdue", "payment_failed"].includes(billingHealth)) healthScore -= 30;
+      else if (["due_soon", "trial_expiring", "manual_review", "not_configured"].includes(billingHealth)) healthScore -= 10;
+      if (analyses30 === 0) healthScore -= 20;
+      if (usageDrop) healthScore -= 15;
+      if (contracted > 0 && activeUsers > contracted) healthScore -= 10;
+      healthScore = Math.max(0, Math.min(100, healthScore));
+
+      const healthLabel: CompanyWithSignals["healthLabel"] =
+        healthScore >= 75 ? "saudavel" : healthScore >= 45 ? "atencao" : "critico";
+
+      const expirationDate = company.expiration_date ? new Date(company.expiration_date) : null;
+      const renewalInDays = expirationDate
+        ? Math.ceil((expirationDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+        : null;
+
+      const incomplete = {
+        cnpj: !company.cnpj,
+        email: !company.contact_email,
+        phone: !company.phone,
+        plan: !company.plan_name,
+        billing: !billing,
+      };
+
+      const upsellOpportunity =
+        (contracted > 0 && activeUsers >= contracted) ||
+        (analyses30 >= 30 && ["starter", "basic", "free", "trial"].some((term) => (company.plan_name || "").toLowerCase().includes(term)));
+
+      return {
+        ...company,
+        billing,
+        alerts: companyAlerts,
+        healthLabel,
+        healthScore,
+        billingStatus: billing?.billing_health || "not_configured",
+        renewalInDays,
+        usageDrop,
+        upsellOpportunity,
+        incomplete,
+      };
+    });
+  }, [companies, billingByCompany, alertsByCompany]);
+
   const filteredCompanies = useMemo(() => {
     const term = companySearch.trim().toLowerCase();
-    return companies.filter((company) => {
-      const matchesSearch = !term || [company.name, company.cnpj, company.contact_email, company.plan_name].join(" ").toLowerCase().includes(term);
+    return companiesWithSignals.filter((company) => {
+      const matchesSearch =
+        !term ||
+        [company.name, company.cnpj, company.contact_email, company.plan_name]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+
       const status = (company.account_status || "").toLowerCase();
-      const plan = (company.plan_name || "sem-plano").toLowerCase();
+      const planLower = (company.plan_name || "").toLowerCase();
+      const billing = company.billing;
+
       const matchesStatus = companyStatusFilter === "all" || status === companyStatusFilter;
-      const matchesPlan = companyPlanFilter === "all" || plan === companyPlanFilter;
-      return matchesSearch && matchesStatus && matchesPlan;
+
+      let matchesPlan = companyPlanFilter === "all";
+      if (companyPlanFilter === "no_plan") matchesPlan = !company.plan_name;
+      if (companyPlanFilter === "trial") matchesPlan = planLower.includes("trial") || billing?.billing_cycle === "trial";
+      if (companyPlanFilter === "free") matchesPlan = planLower.includes("free");
+      if (companyPlanFilter === "paid") matchesPlan = !!company.plan_name && !planLower.includes("free") && !planLower.includes("trial");
+      if (companyPlanFilter === "enterprise") matchesPlan = planLower.includes("enterprise");
+      if (!["all", "no_plan", "trial", "free", "paid", "enterprise"].includes(companyPlanFilter)) {
+        matchesPlan = planLower === companyPlanFilter;
+      }
+
+      let matchesBilling = companyBillingFilter === "all";
+      if (companyBillingFilter === "billing_ok") matchesBilling = company.billingStatus === "ok";
+      if (companyBillingFilter === "due_7d") matchesBilling = company.billingStatus === "due_soon";
+      if (companyBillingFilter === "due_30d") matchesBilling = (company.renewalInDays ?? 999) <= 30 && (company.renewalInDays ?? -1) >= 0;
+      if (companyBillingFilter === "overdue") matchesBilling = company.billingStatus === "overdue";
+      if (companyBillingFilter === "payment_failed") matchesBilling = company.billingStatus === "payment_failed";
+      if (companyBillingFilter === "no_billing") matchesBilling = !billing || company.billingStatus === "not_configured";
+      if (companyBillingFilter === "discount_active") matchesBilling = Number(billing?.discount_value || 0) > 0;
+      if (companyBillingFilter === "discount_expiring") {
+        const daysToDiscount = billing?.discount_expires_at
+          ? Math.ceil((new Date(billing.discount_expires_at).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+          : null;
+        matchesBilling = daysToDiscount !== null && daysToDiscount >= 0 && daysToDiscount <= 30;
+      }
+
+      const analyses7 = Number(company.analyses_7d || 0);
+      const analyses30 = Number(company.analyses_30d || 0);
+      const contracted = Number(company.billing?.contracted_seats || company.max_active_users || 0);
+      const activeUsers = Number(company.active_users_count || 0);
+      let matchesUsage = companyUsageFilter === "all";
+      if (companyUsageFilter === "no_usage_7d") matchesUsage = analyses7 === 0;
+      if (companyUsageFilter === "no_usage_30d") matchesUsage = analyses30 === 0;
+      if (companyUsageFilter === "high_usage") matchesUsage = analyses30 >= 30;
+      if (companyUsageFilter === "low_usage") matchesUsage = analyses30 > 0 && analyses30 < 10;
+      if (companyUsageFilter === "usage_drop") matchesUsage = company.usageDrop;
+      if (companyUsageFilter === "active_above_seats") matchesUsage = contracted > 0 && activeUsers > contracted;
+
+      let matchesRisk = companyRiskFilter === "all";
+      if (companyRiskFilter === "critical") matchesRisk = company.healthLabel === "critico";
+      if (companyRiskFilter === "attention") matchesRisk = company.healthLabel === "atencao";
+      if (companyRiskFilter === "healthy") matchesRisk = company.healthLabel === "saudavel";
+      if (companyRiskFilter === "manual_review") matchesRisk = company.billingStatus === "manual_review";
+      if (companyRiskFilter === "with_alert") matchesRisk = (company.alerts || []).length > 0;
+
+      const createdDays = Math.ceil((Date.now() - new Date(company.created_at || Date.now()).getTime()) / (24 * 60 * 60 * 1000));
+      let matchesCommercial = companyCommercialFilter === "all";
+      if (companyCommercialFilter === "upsell") matchesCommercial = company.upsellOpportunity;
+      if (companyCommercialFilter === "renewal_30d") matchesCommercial = (company.renewalInDays ?? 999) <= 30 && (company.renewalInDays ?? -1) >= 0;
+      if (companyCommercialFilter === "trial_expiring") matchesCommercial = company.billingStatus === "trial_expiring";
+      if (companyCommercialFilter === "new_client") matchesCommercial = createdDays <= 30;
+      if (companyCommercialFilter === "old_client") matchesCommercial = createdDays >= 365;
+
+      let matchesIncomplete = companyIncompleteFilter === "all";
+      if (companyIncompleteFilter === "missing_cnpj") matchesIncomplete = company.incomplete.cnpj;
+      if (companyIncompleteFilter === "missing_email") matchesIncomplete = company.incomplete.email;
+      if (companyIncompleteFilter === "missing_phone") matchesIncomplete = company.incomplete.phone;
+      if (companyIncompleteFilter === "missing_plan") matchesIncomplete = company.incomplete.plan;
+      if (companyIncompleteFilter === "missing_billing") matchesIncomplete = company.incomplete.billing;
+
+      return (
+        matchesSearch &&
+        matchesStatus &&
+        matchesPlan &&
+        matchesBilling &&
+        matchesUsage &&
+        matchesRisk &&
+        matchesCommercial &&
+        matchesIncomplete
+      );
     });
-  }, [companies, companySearch, companyStatusFilter, companyPlanFilter]);
+  }, [
+    companiesWithSignals,
+    companySearch,
+    companyStatusFilter,
+    companyPlanFilter,
+    companyBillingFilter,
+    companyUsageFilter,
+    companyRiskFilter,
+    companyCommercialFilter,
+    companyIncompleteFilter,
+  ]);
 
   const companyStatuses = useMemo(
     () => Array.from(new Set(companies.map((company) => (company.account_status || "").toLowerCase()).filter(Boolean))),
@@ -205,21 +652,15 @@ export default function Backoffice() {
     sorted.sort((a, b) => {
       const direction = companySortDirection === "asc" ? 1 : -1;
 
-      if (companySortBy === "users") {
-        return ((a.active_users_count ?? 0) - (b.active_users_count ?? 0)) * direction;
-      }
+      if (companySortBy === "users") return ((a.active_users_count ?? 0) - (b.active_users_count ?? 0)) * direction;
       if (companySortBy === "created_at") {
         return ((a.created_at ? new Date(a.created_at).getTime() : 0) - (b.created_at ? new Date(b.created_at).getTime() : 0)) * direction;
       }
+      if (companySortBy === "mrr") return ((a.billing?.expected_mrr ?? 0) - (b.billing?.expected_mrr ?? 0)) * direction;
+      if (companySortBy === "usage") return ((a.analyses_30d ?? 0) - (b.analyses_30d ?? 0)) * direction;
 
-      const aValue =
-        companySortBy === "name" ? (a.name || "") :
-        companySortBy === "plan" ? (a.plan_name || "") :
-        (a.account_status || "");
-      const bValue =
-        companySortBy === "name" ? (b.name || "") :
-        companySortBy === "plan" ? (b.plan_name || "") :
-        (b.account_status || "");
+      const aValue = companySortBy === "name" ? (a.name || "") : companySortBy === "plan" ? (a.plan_name || "") : (a.account_status || "");
+      const bValue = companySortBy === "name" ? (b.name || "") : companySortBy === "plan" ? (b.plan_name || "") : (b.account_status || "");
       return aValue.localeCompare(bValue, "pt-BR") * direction;
     });
     return sorted;
@@ -234,21 +675,71 @@ export default function Backoffice() {
 
   const activeCompanies = filteredCompanies.filter((company) => (company.account_status || "").toLowerCase() === "active").length;
 
+  const companyResultSummary = useMemo(() => {
+    const projectedMrr = filteredCompanies.reduce((sum, item) => sum + Number(item.billing?.expected_mrr || 0), 0);
+    const critical = filteredCompanies.filter((item) => item.healthLabel === "critico").length;
+    const paymentIssues = filteredCompanies.filter((item) => ["overdue", "payment_failed"].includes(item.billingStatus)).length;
+    return { projectedMrr, critical, paymentIssues };
+  }, [filteredCompanies]);
+
   useEffect(() => {
     setCompanyPage(1);
-  }, [companySearch, companyStatusFilter, companyPlanFilter, companySortBy, companySortDirection]);
+  }, [
+    companySearch,
+    companyStatusFilter,
+    companyPlanFilter,
+    companyBillingFilter,
+    companyUsageFilter,
+    companyRiskFilter,
+    companyCommercialFilter,
+    companyIncompleteFilter,
+    companySortBy,
+    companySortDirection,
+  ]);
 
   useEffect(() => {
     if (companyPage > totalCompanyPages) setCompanyPage(totalCompanyPages);
   }, [companyPage, totalCompanyPages]);
 
-  function handleCompanySort(nextSort: "name" | "plan" | "users" | "created_at" | "status") {
+  function handleCompanySort(nextSort: "name" | "plan" | "users" | "created_at" | "status" | "mrr" | "usage") {
     if (companySortBy === nextSort) {
       setCompanySortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
       return;
     }
     setCompanySortBy(nextSort);
     setCompanySortDirection("asc");
+  }
+
+  function applySavedView(view: SavedView) {
+    setCompanySavedView(view);
+    setCompanyStatusFilter("all");
+    setCompanyPlanFilter("all");
+    setCompanyBillingFilter("all");
+    setCompanyUsageFilter("all");
+    setCompanyRiskFilter("all");
+    setCompanyCommercialFilter("all");
+    setCompanyIncompleteFilter("all");
+
+    if (view === "risk") {
+      setCompanyRiskFilter("critical");
+    }
+    if (view === "renew_30d") {
+      setCompanyCommercialFilter("renewal_30d");
+    }
+    if (view === "payment_issues") {
+      setCompanyBillingFilter("overdue");
+    }
+    if (view === "upsell") {
+      setCompanyCommercialFilter("upsell");
+      setCompanyUsageFilter("high_usage");
+    }
+    if (view === "missing_config") {
+      setCompanyIncompleteFilter("missing_billing");
+    }
+    if (view === "trial_conversion") {
+      setCompanyPlanFilter("trial");
+      setCompanyBillingFilter("due_30d");
+    }
   }
 
   if (isCheckingSession) {
@@ -299,33 +790,99 @@ export default function Backoffice() {
         {isLoadingData && <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Carregando backoffice...</div>}
 
         <TabsContent value="companies" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Clientes listados</p><p className="mt-2 font-mono text-3xl font-semibold">{filteredCompanies.length}</p></CardContent></Card>
+          <div className="grid gap-4 md:grid-cols-5">
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Clientes no resultado</p><p className="mt-2 font-mono text-3xl font-semibold">{filteredCompanies.length}</p></CardContent></Card>
             <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Clientes ativos</p><p className="mt-2 font-mono text-3xl font-semibold text-success">{activeCompanies}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Em risco crítico</p><p className="mt-2 font-mono text-3xl font-semibold text-destructive">{companyResultSummary.critical}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Problemas de pagamento</p><p className="mt-2 font-mono text-3xl font-semibold text-warning">{companyResultSummary.paymentIssues}</p></CardContent></Card>
+            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">MRR esperado</p><p className="mt-2 font-mono text-3xl font-semibold text-primary">{formatCurrency(companyResultSummary.projectedMrr)}</p></CardContent></Card>
           </div>
-          <div className="grid gap-3 lg:grid-cols-3">
+
+          <div className="grid gap-3 lg:grid-cols-4">
             <Input placeholder="Buscar por empresa, CNPJ, e-mail ou plano" value={companySearch} onChange={(event) => setCompanySearch(event.target.value)} />
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={companySavedView} onChange={(event) => applySavedView(event.target.value as SavedView)}>
+              <option value="all">Views salvas: todas</option>
+              <option value="risk">Clientes em risco</option>
+              <option value="renew_30d">Renovar nos próximos 30 dias</option>
+              <option value="payment_issues">Pagamentos com problema</option>
+              <option value="upsell">Alto uso / oportunidade upsell</option>
+              <option value="missing_config">Contas sem configuração</option>
+              <option value="trial_conversion">Trials para converter</option>
+            </select>
             <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={companyStatusFilter} onChange={(event) => setCompanyStatusFilter(event.target.value)}>
-              <option value="all">Todos os status</option>
-              {companyStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+              <option value="all">Status da conta</option>
+              {companyStatuses.map((status) => <option key={status} value={status}>{accountStatusLabel(status)}</option>)}
+              <option value="blocked">Bloqueado</option>
             </select>
             <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={companyPlanFilter} onChange={(event) => setCompanyPlanFilter(event.target.value)}>
-              <option value="all">Todos os planos</option>
+              <option value="all">Plano</option>
+              <option value="no_plan">Sem plano</option>
+              <option value="trial">Trial</option>
+              <option value="free">Free</option>
+              <option value="paid">Pago</option>
+              <option value="enterprise">Enterprise</option>
               {companyPlans.map((plan) => <option key={plan} value={plan.toLowerCase()}>{plan}</option>)}
             </select>
           </div>
-          <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <span>{sortedCompanies.length} cliente(s) no resultado</span>
+
+          <div className="grid gap-3 lg:grid-cols-4">
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={companyBillingFilter} onChange={(event) => setCompanyBillingFilter(event.target.value)}>
+              <option value="all">Financeiro</option>
+              <option value="billing_ok">Billing ok</option>
+              <option value="due_7d">Vence em 7 dias</option>
+              <option value="due_30d">Vence em 30 dias</option>
+              <option value="overdue">Atrasado</option>
+              <option value="payment_failed">Falha no pagamento</option>
+              <option value="no_billing">Sem billing configurado</option>
+              <option value="discount_active">Com desconto ativo</option>
+              <option value="discount_expiring">Desconto expirando</option>
+            </select>
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={companyUsageFilter} onChange={(event) => setCompanyUsageFilter(event.target.value)}>
+              <option value="all">Uso</option>
+              <option value="no_usage_7d">Sem uso nos últimos 7 dias</option>
+              <option value="no_usage_30d">Sem uso nos últimos 30 dias</option>
+              <option value="high_usage">Alto uso</option>
+              <option value="low_usage">Baixo uso</option>
+              <option value="usage_drop">Queda de uso</option>
+              <option value="active_above_seats">Ativos acima do contratado</option>
+            </select>
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={companyRiskFilter} onChange={(event) => setCompanyRiskFilter(event.target.value)}>
+              <option value="all">Risco</option>
+              <option value="critical">Crítico</option>
+              <option value="attention">Atenção</option>
+              <option value="healthy">Saudável</option>
+              <option value="manual_review">Requer revisão manual</option>
+              <option value="with_alert">Com alerta aberto</option>
+            </select>
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={companyCommercialFilter} onChange={(event) => setCompanyCommercialFilter(event.target.value)}>
+              <option value="all">Comercial</option>
+              <option value="upsell">Oportunidade de upsell</option>
+              <option value="renewal_30d">Renovação próxima</option>
+              <option value="trial_expiring">Trial expirando</option>
+              <option value="new_client">Cliente novo</option>
+              <option value="old_client">Cliente antigo</option>
+            </select>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={companyIncompleteFilter} onChange={(event) => setCompanyIncompleteFilter(event.target.value)}>
+              <option value="all">Dados incompletos</option>
+              <option value="missing_cnpj">Sem CNPJ</option>
+              <option value="missing_email">Sem e-mail</option>
+              <option value="missing_phone">Sem telefone</option>
+              <option value="missing_plan">Sem plano</option>
+              <option value="missing_billing">Sem cobrança</option>
+            </select>
             <Button variant="ghost" size="sm" onClick={() => {
               setCompanySearch("");
-              setCompanyStatusFilter("all");
-              setCompanyPlanFilter("all");
+              applySavedView("all");
               setCompanySortBy("name");
               setCompanySortDirection("asc");
             }}>
               Limpar filtros
             </Button>
           </div>
+
           <Card>
             <CardContent className="p-0">
               {sortedCompanies.length ? (
@@ -333,33 +890,66 @@ export default function Backoffice() {
                   <TableHeader>
                     <TableRow>
                       <TableHead><button type="button" onClick={() => handleCompanySort("name")}>Empresa</button></TableHead>
-                      <TableHead><button type="button" onClick={() => handleCompanySort("plan")}>Plano</button></TableHead>
+                      <TableHead><button type="button" onClick={() => handleCompanySort("plan")}>Plano / Ciclo</button></TableHead>
                       <TableHead><button type="button" onClick={() => handleCompanySort("users")}>Usuários</button></TableHead>
-                      <TableHead><button type="button" onClick={() => handleCompanySort("created_at")}>Cadastro</button></TableHead>
-                      <TableHead><button type="button" onClick={() => handleCompanySort("status")}>Status</button></TableHead>
+                      <TableHead><button type="button" onClick={() => handleCompanySort("usage")}>Uso 30d</button></TableHead>
+                      <TableHead><button type="button" onClick={() => handleCompanySort("mrr")}>MRR</button></TableHead>
+                      <TableHead><button type="button" onClick={() => handleCompanySort("status")}>Saúde</button></TableHead>
                       <TableHead>Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {paginatedCompanies.map((company) => (
-                      <TableRow key={company.id} className="hover:bg-muted/40" onDoubleClick={() => setSelectedCompany(company)}>
-                        <TableCell className="font-medium">{company.name || "-"}<p className="text-xs text-muted-foreground">{company.contact_email || "-"}</p></TableCell>
-                        <TableCell>{company.plan_name || "Sem plano"}</TableCell>
-                        <TableCell>{company.active_users_count ?? 0} ativos / {company.users_count ?? 0} totais</TableCell>
-                        <TableCell>{fmtDate(company.created_at)}</TableCell>
-                        <TableCell><Badge variant="outline">{company.account_status || "-"}</Badge></TableCell>
+                      <TableRow key={company.id} className="hover:bg-muted/40" onDoubleClick={() => void handleOpenCompany(company)}>
+                        <TableCell className="font-medium">
+                          {company.name || "-"}
+                          <p className="text-xs text-muted-foreground">{company.contact_email || "Sem e-mail"}</p>
+                        </TableCell>
                         <TableCell>
-                          <Button size="sm" variant="outline" onClick={() => setSelectedCompany(company)}>Ver detalhes</Button>
+                          {company.plan_name || "Sem plano"}
+                          <p className="text-xs text-muted-foreground">{billingCycleLabel(company.billing?.billing_cycle || company.plan_payment_type)}</p>
+                        </TableCell>
+                        <TableCell>
+                          {company.active_users_count ?? 0} ativos / {company.users_count ?? 0} totais
+                          {(company.billing?.contracted_seats || company.max_active_users) ? (
+                            <p className="text-xs text-muted-foreground">{company.billing?.contracted_seats || company.max_active_users} contratados</p>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          <span className="font-mono">{company.analyses_30d ?? 0}</span>
+                          <p className="text-xs text-muted-foreground">7d: {company.analyses_7d ?? 0}</p>
+                        </TableCell>
+                        <TableCell>
+                          <span className="font-mono">{formatCurrency(Number(company.billing?.expected_mrr || 0))}</span>
+                          <p className="text-xs text-muted-foreground">{billingHealthLabel(company.billingStatus)}</p>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={
+                              company.healthLabel === "saudavel"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : company.healthLabel === "atencao"
+                                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                                  : "border-red-200 bg-red-50 text-red-700"
+                            }
+                          >
+                            {company.healthLabel === "saudavel" ? "Saudável" : company.healthLabel === "atencao" ? "Atenção" : "Crítico"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button size="sm" variant="outline" onClick={() => void handleOpenCompany(company)}>Ver detalhes</Button>
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               ) : (
-                <EmptyState message="Nenhuma empresa retornada ainda. O backend está conectado; falta mapear o schema de empresas do FirstLine para o banco atual." />
+                <EmptyState message="Nenhuma empresa encontrada com esses filtros." />
               )}
             </CardContent>
           </Card>
+
           <div className="flex items-center justify-end gap-2">
             <Button variant="outline" size="sm" disabled={companyPage <= 1} onClick={() => setCompanyPage((prev) => Math.max(1, prev - 1))}>Anterior</Button>
             <span className="text-sm text-muted-foreground">Página {companyPage} de {totalCompanyPages}</span>
@@ -440,26 +1030,381 @@ export default function Backoffice() {
         </TabsContent>
       </Tabs>
 
-      <div className="rounded-lg border border-border bg-secondary/30 p-4 text-sm text-muted-foreground"><Database className="mr-2 inline h-4 w-4" />Backend conectado. Esta é a primeira camada do backoffice; os dados operacionais entram quando mapearmos o schema FirstLine completo.</div>
+      <div className="rounded-lg border border-border bg-secondary/30 p-4 text-sm text-muted-foreground"><Database className="mr-2 inline h-4 w-4" />Backoffice em modo Customer 360 com visão operacional, financeira, uso e riscos por cliente.</div>
 
-      <Dialog open={!!selectedCompany} onOpenChange={(open) => !open && setSelectedCompany(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{selectedCompany?.name || "Cliente"}</DialogTitle>
-          </DialogHeader>
-          {selectedCompany && (
-            <div className="grid gap-3 text-sm">
-              <div><span className="text-muted-foreground">E-mail:</span> {selectedCompany.contact_email || "-"}</div>
-              <div><span className="text-muted-foreground">CNPJ:</span> {selectedCompany.cnpj || "-"}</div>
-              <div><span className="text-muted-foreground">Telefone:</span> {selectedCompany.phone || "-"}</div>
-              <div><span className="text-muted-foreground">Plano:</span> {selectedCompany.plan_name || "Sem plano"}</div>
-              <div><span className="text-muted-foreground">Tipo de cobrança:</span> {selectedCompany.plan_payment_type || "-"}</div>
-              <div><span className="text-muted-foreground">Usuários:</span> {selectedCompany.active_users_count ?? 0} ativos / {selectedCompany.users_count ?? 0} totais</div>
-              <div><span className="text-muted-foreground">Status:</span> {selectedCompany.account_status || "-"}</div>
-              <div><span className="text-muted-foreground">Cadastro:</span> {fmtDate(selectedCompany.created_at)}</div>
-              <div><span className="text-muted-foreground">Expiração:</span> {fmtDate(selectedCompany.expiration_date)}</div>
+      <Dialog open={!!selectedCompany} onOpenChange={(open) => {
+        if (!open) {
+          setSelectedCompany(null);
+          setCompanyDetail(null);
+          setCompanyBilling(null);
+          setCompanyBillingEvents([]);
+          setCompanyStripeEvents([]);
+          setCompanyStripePurchases([]);
+          setCompanyAlerts([]);
+          setCompanyAuditLog([]);
+        }
+      }}>
+        <DialogContent className="max-h-[92vh] overflow-hidden p-0 sm:max-w-[1200px]">
+          <DialogHeader className="border-b border-border px-6 py-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <DialogTitle className="text-2xl font-semibold">{companyDetail?.name || selectedCompany?.name || "Cliente"}</DialogTitle>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  <Badge variant="outline">{accountStatusLabel(companyDetail?.account_status || selectedCompany?.account_status)}</Badge>
+                  <span>{companyDetail?.plan_name || "Sem plano"}</span>
+                  <span>{billingCycleLabel(companyBilling?.billing_cycle || companyDetail?.plan_payment_type)}</span>
+                  <span>{companyDetail?.contact_email || "Sem e-mail"}</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => setStatusForm((prev) => ({ ...prev, status: "active" }))}>Ativar</Button>
+                <Button size="sm" variant="outline" onClick={() => setStatusForm((prev) => ({ ...prev, status: "inactive" }))}>Inativar</Button>
+                <Button size="sm" variant="outline" onClick={() => setStatusForm((prev) => ({ ...prev, status: "suspended" }))}>Suspender</Button>
+              </div>
             </div>
-          )}
+          </DialogHeader>
+
+          <ScrollArea className="max-h-[calc(92vh-104px)]">
+            {isLoadingCompanyDetail ? (
+              <div className="flex h-[320px] items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="space-y-6 p-6">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <MetricTile
+                    label="MRR esperado"
+                    value={formatCurrency(Number(companyBilling?.expected_mrr || 0))}
+                    hint="Receita mensal gerencial"
+                  />
+                  <MetricTile
+                    label="ARR esperado"
+                    value={formatCurrency(Number(companyBilling?.expected_arr || 0))}
+                    hint="Receita anual gerencial"
+                  />
+                  <MetricTile
+                    label="Próxima cobrança"
+                    value={fmtDate(companyBilling?.next_billing_date)}
+                    hint={billingHealthLabel(companyBilling?.billing_health)}
+                  />
+                  <MetricTile
+                    label="Usuários"
+                    value={`${companyDetail?.active_users_count ?? 0} / ${companyBilling?.contracted_seats || companyDetail?.max_active_users || 0}`}
+                    hint="Ativos / contratados"
+                  />
+                </div>
+
+                <section className="rounded-lg border border-border/70">
+                  <div className="border-b border-border px-4 py-3">
+                    <h3 className="font-semibold">Gestão operacional</h3>
+                    <p className="text-xs text-muted-foreground">Campos editáveis conectados ao banco: status, plano, limites e billing.</p>
+                  </div>
+                  <div className="grid gap-4 p-4 lg:grid-cols-2">
+                    <div className="space-y-3 rounded-md border border-border/70 p-3">
+                      <p className="text-sm font-semibold">Status da conta</p>
+                      <select
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        value={statusForm.status}
+                        onChange={(event) => setStatusForm((prev) => ({ ...prev, status: event.target.value }))}
+                      >
+                        <option value="active">Ativo</option>
+                        <option value="inactive">Inativo</option>
+                        <option value="suspended">Suspenso</option>
+                      </select>
+                      <Input
+                        placeholder="Motivo da alteração (auditoria)"
+                        value={statusForm.reason}
+                        onChange={(event) => setStatusForm((prev) => ({ ...prev, reason: event.target.value }))}
+                      />
+                      <Button size="sm" onClick={() => void handleSaveStatus()} disabled={isSavingStatus}>
+                        {isSavingStatus ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Salvar status
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3 rounded-md border border-border/70 p-3">
+                      <p className="text-sm font-semibold">Plano e expiração</p>
+                      <select
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        value={planForm.subscriptionId}
+                        onChange={(event) => setPlanForm((prev) => ({ ...prev, subscriptionId: event.target.value }))}
+                      >
+                        <option value="">Selecione um plano</option>
+                        {plans.map((plan) => (
+                          <option key={plan.id} value={plan.id}>{plan.name}</option>
+                        ))}
+                      </select>
+                      <Input
+                        type="date"
+                        value={planForm.expirationDate}
+                        onChange={(event) => setPlanForm((prev) => ({ ...prev, expirationDate: event.target.value }))}
+                      />
+                      <Input
+                        placeholder="Motivo da troca de plano"
+                        value={planForm.reason}
+                        onChange={(event) => setPlanForm((prev) => ({ ...prev, reason: event.target.value }))}
+                      />
+                      <Button size="sm" onClick={() => void handleSavePlan()} disabled={isSavingPlan || !planForm.subscriptionId}>
+                        {isSavingPlan ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Salvar plano
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3 rounded-md border border-border/70 p-3">
+                      <p className="text-sm font-semibold">Limites operacionais</p>
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Limite de usuários ativos"
+                        value={limitsForm.maxActiveUsers}
+                        onChange={(event) => setLimitsForm((prev) => ({ ...prev, maxActiveUsers: event.target.value }))}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Limite mensal de análises"
+                        value={limitsForm.monthlyAnalysisLimit}
+                        onChange={(event) => setLimitsForm((prev) => ({ ...prev, monthlyAnalysisLimit: event.target.value }))}
+                      />
+                      <Input
+                        placeholder="Motivo da alteração de limite"
+                        value={limitsForm.reason}
+                        onChange={(event) => setLimitsForm((prev) => ({ ...prev, reason: event.target.value }))}
+                      />
+                      <Button size="sm" onClick={() => void handleSaveLimits()} disabled={isSavingLimits}>
+                        {isSavingLimits ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Salvar limites
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3 rounded-md border border-border/70 p-3">
+                      <p className="text-sm font-semibold">Billing gerencial</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          placeholder="Assentos contratados"
+                          value={billingForm.contractedSeats}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, contractedSeats: event.target.value }))}
+                        />
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          placeholder="Preço por assento"
+                          value={billingForm.unitPrice}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, unitPrice: event.target.value }))}
+                        />
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <select
+                          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          value={billingForm.billingCycle}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, billingCycle: event.target.value }))}
+                        >
+                          <option value="monthly">Mensal</option>
+                          <option value="yearly">Anual</option>
+                          <option value="trial">Trial</option>
+                          <option value="manual">Manual</option>
+                        </select>
+                        <select
+                          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          value={billingForm.discountType}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, discountType: event.target.value }))}
+                        >
+                          <option value="none">Sem desconto</option>
+                          <option value="percent">Percentual</option>
+                          <option value="fixed_amount">Valor fixo</option>
+                          <option value="custom">Customizado</option>
+                        </select>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          placeholder="Valor do desconto"
+                          value={billingForm.discountValue}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, discountValue: event.target.value }))}
+                        />
+                        <Input
+                          type="date"
+                          value={billingForm.discountExpiresAt}
+                          onChange={(event) => setBillingForm((prev) => ({ ...prev, discountExpiresAt: event.target.value }))}
+                        />
+                      </div>
+                      <Input
+                        placeholder="Motivo do ajuste de billing"
+                        value={billingForm.reason}
+                        onChange={(event) => setBillingForm((prev) => ({ ...prev, reason: event.target.value }))}
+                      />
+                      <Button size="sm" onClick={() => void handleSaveBilling()} disabled={isSavingBilling}>
+                        {isSavingBilling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Salvar billing
+                      </Button>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <section className="rounded-lg border border-border/70">
+                    <div className="border-b border-border px-4 py-3">
+                      <h3 className="font-semibold">Cabeçalho executivo</h3>
+                    </div>
+                    <div className="grid gap-3 p-4 text-sm">
+                      <div><span className="text-muted-foreground">CNPJ:</span> {companyDetail?.cnpj || "-"}</div>
+                      <div><span className="text-muted-foreground">Telefone:</span> {companyDetail?.phone || "-"}</div>
+                      <div><span className="text-muted-foreground">Início:</span> {fmtDate(companyBilling?.start_date || companyDetail?.created_at)}</div>
+                      <div><span className="text-muted-foreground">Expiração:</span> {fmtDate(companyDetail?.expiration_date)}</div>
+                      <div><span className="text-muted-foreground">Health score:</span> {companyDetail?.health?.score ?? "-"} ({companyDetail?.health?.label || "-"})</div>
+                      <div><span className="text-muted-foreground">Próxima melhor ação:</span> {(companyDetail?.health?.next_actions || []).join(" · ") || "-"}</div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-lg border border-border/70">
+                    <div className="border-b border-border px-4 py-3">
+                      <h3 className="font-semibold">Uso do produto</h3>
+                    </div>
+                    <div className="grid gap-3 p-4 text-sm">
+                      <div className="flex items-center gap-2"><Activity className="h-4 w-4 text-muted-foreground" />Análises totais: <span className="font-mono">{companyDetail?.analytics?.analyses_total ?? 0}</span></div>
+                      <div className="flex items-center gap-2"><CalendarClock className="h-4 w-4 text-muted-foreground" />Últimos 7 dias: <span className="font-mono">{companyDetail?.analytics?.analyses_7d ?? 0}</span></div>
+                      <div className="flex items-center gap-2"><CalendarClock className="h-4 w-4 text-muted-foreground" />Últimos 30 dias: <span className="font-mono">{companyDetail?.analytics?.analyses_30d ?? 0}</span></div>
+                      <div className="flex items-center gap-2"><Users className="h-4 w-4 text-muted-foreground" />Usuários com uso: <span className="font-mono">{companyDetail?.analytics?.users_with_analyses ?? 0}</span></div>
+                      <div className="flex items-center gap-2"><TrendingUp className="h-4 w-4 text-muted-foreground" />Score médio: <span className="font-mono">{Number(companyDetail?.analytics?.avg_score_geral || 0).toFixed(1)}</span></div>
+                      <div className="flex items-center gap-2"><CircleDollarSign className="h-4 w-4 text-muted-foreground" />Última análise: <span>{fmtDateTime(companyDetail?.analytics?.last_analysis_at)}</span></div>
+                    </div>
+                  </section>
+                </div>
+
+                <section className="rounded-lg border border-border/70">
+                  <div className="border-b border-border px-4 py-3">
+                    <h3 className="font-semibold">Financeiro / Billing</h3>
+                  </div>
+                  <div className="grid gap-3 p-4 text-sm md:grid-cols-2">
+                    <div><span className="text-muted-foreground">Plano contratado:</span> {companyBilling?.plan_name || companyDetail?.plan_name || "-"}</div>
+                    <div><span className="text-muted-foreground">Valor por usuário:</span> {formatCurrency(Number(companyBilling?.unit_price || 0))}</div>
+                    <div><span className="text-muted-foreground">Assentos contratados:</span> {companyBilling?.contracted_seats ?? companyDetail?.max_active_users ?? 0}</div>
+                    <div><span className="text-muted-foreground">Usuários ativos:</span> {companyDetail?.active_users_count ?? 0}</div>
+                    <div><span className="text-muted-foreground">Desconto:</span> {Number(companyBilling?.discount_value || 0) > 0 ? `${companyBilling?.discount_type} (${companyBilling?.discount_value})` : "Sem desconto"}</div>
+                    <div><span className="text-muted-foreground">Expiração do desconto:</span> {fmtDate(companyBilling?.discount_expires_at)}</div>
+                    <div><span className="text-muted-foreground">MRR líquido:</span> {formatCurrency(Number(companyBilling?.expected_mrr || 0))}</div>
+                    <div><span className="text-muted-foreground">ARR líquido:</span> {formatCurrency(Number(companyBilling?.expected_arr || 0))}</div>
+                    <div><span className="text-muted-foreground">Última cobrança:</span> {fmtDate(companyBilling?.last_billing_date)}</div>
+                    <div><span className="text-muted-foreground">Próxima cobrança:</span> {fmtDate(companyBilling?.next_billing_date)}</div>
+                    <div><span className="text-muted-foreground">Stripe customer:</span> {companyBilling?.stripe_customer_id || "-"}</div>
+                    <div><span className="text-muted-foreground">Stripe subscription:</span> {companyBilling?.stripe_subscription_id || "-"}</div>
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-border/70">
+                  <div className="border-b border-border px-4 py-3">
+                    <h3 className="font-semibold">Usuários</h3>
+                  </div>
+                  {companyDetail?.users?.length ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[900px] text-sm">
+                        <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                          <tr>
+                            <th className="px-4 py-3 font-medium">Nome</th>
+                            <th className="px-4 py-3 font-medium">Contato</th>
+                            <th className="px-4 py-3 font-medium">Status / Papel</th>
+                            <th className="px-4 py-3 font-medium">Calendário</th>
+                            <th className="px-4 py-3 font-medium">Último uso</th>
+                            <th className="px-4 py-3 text-right font-medium">Análises</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {companyDetail.users.map((user) => (
+                            <tr key={user.id} className="border-t border-border/70">
+                              <td className="px-4 py-3 font-medium">{user.name || "-"}</td>
+                              <td className="px-4 py-3 text-muted-foreground">{user.email || "-"}<br />{user.phone || ""}</td>
+                              <td className="px-4 py-3">{user.status || "-"} · {user.role || user.seller_type || "-"}</td>
+                              <td className="px-4 py-3">{calendarLabel(user.calendar_connected, user.microsoft_calendar_connected)}</td>
+                              <td className="px-4 py-3">{fmtDateTime(user.last_analysis_at)}</td>
+                              <td className="px-4 py-3 text-right font-mono">{user.analyses_count ?? 0}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="p-4 text-sm text-muted-foreground">Nenhum usuário vinculado encontrado.</div>
+                  )}
+                </section>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <section className="rounded-lg border border-border/70">
+                    <div className="border-b border-border px-4 py-3">
+                      <h3 className="font-semibold">Riscos e alertas</h3>
+                    </div>
+                    <div className="space-y-2 p-4 text-sm">
+                      {companyAlerts.length > 0 ? companyAlerts.map((alert) => (
+                        <div key={`${alert.alert_code}-${alert.company_id}`} className="rounded-md border border-border p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-medium">{alert.message}</p>
+                            <Badge variant={alert.severity === "high" ? "destructive" : "outline"}>{alert.severity}</Badge>
+                          </div>
+                        </div>
+                      )) : <p className="text-muted-foreground">Sem alertas ativos para essa empresa.</p>}
+                    </div>
+                  </section>
+
+                  <section className="rounded-lg border border-border/70">
+                    <div className="border-b border-border px-4 py-3">
+                      <h3 className="font-semibold">Histórico e eventos</h3>
+                    </div>
+                    <div className="space-y-2 p-4 text-sm">
+                      {[...companyBillingEvents.slice(0, 5), ...companyAuditLog.slice(0, 5)].length ? (
+                        [...companyBillingEvents.slice(0, 5), ...companyAuditLog.slice(0, 5)]
+                          .sort((a, b) => new Date((b as BillingEvent).event_date || (b as AuditLogItem).created_at || 0).getTime() - new Date((a as BillingEvent).event_date || (a as AuditLogItem).created_at || 0).getTime())
+                          .map((item, idx) => (
+                            <div key={`${item.id}-${idx}`} className="rounded-md border border-border p-3">
+                              <p className="font-medium">{"event_type" in item ? item.event_type : item.action}</p>
+                              <p className="text-xs text-muted-foreground">{fmtDateTime("event_date" in item ? item.event_date : item.created_at)} · {("created_by" in item ? item.created_by : item.actor_email) || "sistema"}</p>
+                              {("description" in item && item.description) ? <p className="mt-1 text-xs text-muted-foreground">{item.description}</p> : null}
+                            </div>
+                          ))
+                      ) : (
+                        <p className="text-muted-foreground">Sem eventos no histórico.</p>
+                      )}
+                    </div>
+                  </section>
+                </div>
+
+                <section className="rounded-lg border border-border/70">
+                  <div className="border-b border-border px-4 py-3">
+                    <h3 className="font-semibold">Eventos Stripe</h3>
+                  </div>
+                  <div className="grid gap-3 p-4 md:grid-cols-2">
+                    <div>
+                      <p className="mb-2 text-sm font-medium">Webhook events</p>
+                      <div className="space-y-2 text-xs">
+                        {companyStripeEvents.slice(0, 8).map((event) => (
+                          <div key={event.id} className="rounded border border-border p-2">
+                            <p className="font-medium">{event.event_type}</p>
+                            <p className="text-muted-foreground">{event.processing_status} · {fmtDateTime(event.created_at)}</p>
+                          </div>
+                        ))}
+                        {!companyStripeEvents.length && <p className="text-muted-foreground">Sem eventos Stripe vinculados.</p>}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="mb-2 text-sm font-medium">Compras Stripe</p>
+                      <div className="space-y-2 text-xs">
+                        {companyStripePurchases.slice(0, 8).map((purchase) => (
+                          <div key={purchase.id} className="rounded border border-border p-2">
+                            <p className="font-medium">{purchase.plan_name || "Plano"} · {formatCurrency(Number(purchase.amount_total || 0))}</p>
+                            <p className="text-muted-foreground">{purchase.account_creation_status} · {fmtDateTime(purchase.created_at)}</p>
+                          </div>
+                        ))}
+                        {!companyStripePurchases.length && <p className="text-muted-foreground">Sem compras Stripe vinculadas.</p>}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            )}
+          </ScrollArea>
         </DialogContent>
       </Dialog>
     </div>
