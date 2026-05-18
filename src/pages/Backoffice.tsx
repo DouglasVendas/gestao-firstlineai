@@ -1016,15 +1016,12 @@ export default function Backoffice() {
     });
   }, [growthReferral, referralSearch, referralStageFilter]);
 
-  const referralFilteredSummary = useMemo(() => {
-    const total = filteredReferralItems.length;
-    const converted = filteredReferralItems.filter((item) => item.is_converted).length;
-    const revenue = filteredReferralItems.reduce((sum, item) => sum + Number(item.is_converted ? item.value || 0 : 0), 0);
-    const pipeline = filteredReferralItems.reduce((sum, item) => {
-      const stage = (item.stage || "").toLowerCase();
-      if (stage === "closed_won" || stage === "closed_lost") return sum;
-      return sum + Number(item.value || 0);
-    }, 0);
+  const referralKpis = useMemo(() => {
+    const items = growthReferral?.items || [];
+    const total = items.length;
+    const converted = items.filter((item) => item.is_converted).length;
+    const revenue = items.reduce((sum, item) => sum + Number(item.is_converted ? item.value || 0 : 0), 0);
+    const pipeline = items.reduce((sum, item) => sum + Number(item.is_converted ? 0 : item.value || 0), 0);
     return {
       total,
       converted,
@@ -1032,7 +1029,7 @@ export default function Backoffice() {
       revenue,
       pipeline,
     };
-  }, [filteredReferralItems]);
+  }, [growthReferral]);
 
   const referralOriginRanking = useMemo(() => {
     const ranking = filteredReferralItems.reduce((acc, item) => {
@@ -1544,13 +1541,12 @@ export default function Backoffice() {
               <h3 className="text-base font-semibold">Indicação</h3>
               <Badge variant="outline">{growthReferral?.summary.total_indications ?? 0} indicações totais</Badge>
             </div>
-            <div className="grid gap-4 md:grid-cols-6">
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Indicações (filtro)</p><p className="mt-2 font-mono text-2xl font-semibold">{referralFilteredSummary.total}</p></CardContent></Card>
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Convertidos</p><p className="mt-2 font-mono text-2xl font-semibold text-success">{referralFilteredSummary.converted}</p></CardContent></Card>
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Clientes na base</p><p className="mt-2 font-mono text-2xl font-semibold">{growthReferral?.summary.customers_in_base ?? referralCustomers.length}</p></CardContent></Card>
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Taxa conversão</p><p className="mt-2 font-mono text-2xl font-semibold">{referralFilteredSummary.conversionRate}%</p></CardContent></Card>
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Pipeline</p><p className="mt-2 font-mono text-2xl font-semibold">{formatCurrency(referralFilteredSummary.pipeline)}</p></CardContent></Card>
-              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Receita ganha</p><p className="mt-2 font-mono text-2xl font-semibold text-primary">{formatCurrency(referralFilteredSummary.revenue)}</p></CardContent></Card>
+            <div className="grid gap-4 md:grid-cols-5">
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Indicações</p><p className="mt-2 font-mono text-2xl font-semibold">{referralKpis.total}</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Convertidos</p><p className="mt-2 font-mono text-2xl font-semibold text-success">{referralKpis.converted}</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Taxa conversão</p><p className="mt-2 font-mono text-2xl font-semibold">{referralKpis.conversionRate}%</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Pipeline potencial</p><p className="mt-2 font-mono text-2xl font-semibold">{formatCurrency(referralKpis.pipeline)}</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Receita ganha</p><p className="mt-2 font-mono text-2xl font-semibold text-primary">{formatCurrency(referralKpis.revenue)}</p></CardContent></Card>
             </div>
 
             <div className="grid gap-3 lg:grid-cols-2">

@@ -1331,11 +1331,39 @@ def create_app() -> Flask:
             except (TypeError, ValueError):
                 return 0.0
 
+        def normalize_plan_name(value: Any) -> str:
+            return str(value or '').strip().lower()
+
+        def is_trial_plan(plan_name: Any) -> bool:
+            normalized = normalize_plan_name(plan_name)
+            return 'trial' in normalized
+
+        def is_paid_plan(plan_name: Any) -> bool:
+            normalized = normalize_plan_name(plan_name)
+            if not normalized or is_trial_plan(normalized):
+                return False
+            return ('professional' in normalized) or ('enterprise' in normalized)
+
         with firstline_db().engine.connect() as conn:
             companies_rows = conn.execute(
                 text(
                     """
-                    WITH latest_plan AS (
+                    WITH company_users_agg AS (
+                        SELECT uc.company_id,
+                               count(*) AS users_count,
+                               count(*) FILTER (WHERE u.status = 'ACTIVE') AS active_users_count
+                        FROM public.user_company uc
+                        JOIN public.users u ON u.id = uc.user_id
+                        GROUP BY uc.company_id
+                    ),
+                    trial_history AS (
+                        SELECT cs.company_id,
+                               bool_or(lower(coalesce(s.name, '')) LIKE '%trial%') AS had_trial_history
+                        FROM public.company_subscription cs
+                        JOIN public.subscription s ON s.id = cs.subscription_id
+                        GROUP BY cs.company_id
+                    ),
+                    latest_plan AS (
                         SELECT DISTINCT ON (cs.company_id)
                                cs.company_id,
                                cs.status AS subscription_status,
@@ -1354,6 +1382,8 @@ def create_app() -> Flask:
                            c.responsible_name,
                            c.referred_by,
                            c.max_active_users,
+                           COALESCE(cua.users_count, 0) AS users_count,
+                           COALESCE(cua.active_users_count, 0) AS active_users_count,
                            c.created_at,
                            c.updated_at,
                            lp.subscription_status,
@@ -1361,10 +1391,13 @@ def create_app() -> Flask:
                            lp.plan_name,
                            lp.unit_price,
                            lp.payment_type,
+                           COALESCE(th.had_trial_history, false) AS had_trial_history,
                            rl.token AS referral_token,
                            ru.name AS referral_user_name,
                            ru.email AS referral_user_email
                     FROM public.company c
+                    LEFT JOIN company_users_agg cua ON cua.company_id = c.id
+                    LEFT JOIN trial_history th ON th.company_id = c.id
                     LEFT JOIN latest_plan lp ON lp.company_id = c.id
                     LEFT JOIN public.referral_links rl
                       ON upper(trim(coalesce(c.referred_by, ''))) = upper(trim(coalesce(rl.token, '')))
@@ -1382,11 +1415,11 @@ def create_app() -> Flask:
                 continue
             company_id = str(company.get('id') or '')
             unit_price = as_float(company.get('unit_price'))
-            seats = int(company.get('max_active_users') or 1)
-            value = round(max(unit_price * max(seats, 1), unit_price), 2)
-            account_status = str(company.get('account_status') or '').lower()
-            subscription_status = str(company.get('subscription_status') or '').lower()
-            is_converted = account_status in {'active', 'trial'} or subscription_status in {'active', 'trialing'}
+            users_count = int(company.get('users_count') or 0)
+            value = round(unit_price * users_count, 2)
+            plan_name = company.get('plan_name')
+            had_trial_history = bool(company.get('had_trial_history'))
+            is_converted = had_trial_history and is_paid_plan(plan_name)
             referrer_name = (
                 str(company.get('referral_user_name') or '').strip()
                 or str(company.get('referral_user_email') or '').strip()
@@ -1402,6 +1435,8 @@ def create_app() -> Flask:
                         'referred_contact': company.get('contact_email') or company.get('responsible_name'),
                         'stage': 'closed_won' if is_converted else 'lead',
                         'value': value,
+                        'plan_name': plan_name,
+                        'users_count': users_count,
                         'is_converted': is_converted,
                         'deal_tags': [f'token:{referred_by}'],
                         'firstline_company_id': company_id,
@@ -1430,7 +1465,7 @@ def create_app() -> Flask:
         total_referrals = len(referral_items)
         converted_referrals = sum(1 for item in referral_items if item.get('is_converted'))
         converted_customers_count = len(referral_customers)
-        referral_pipeline_value = round(sum(as_float(item.get('value')) for item in referral_items if str(item.get('stage')) not in {'closed_won', 'closed_lost'}), 2)
+        referral_pipeline_value = round(sum(as_float(item.get('value')) for item in referral_items if not item.get('is_converted')), 2)
         referral_revenue = round(sum(as_float(item.get('value')) for item in referral_items if item.get('is_converted')), 2)
         referral_conversion = round((converted_referrals / total_referrals * 100) if total_referrals else 0, 1)
 
