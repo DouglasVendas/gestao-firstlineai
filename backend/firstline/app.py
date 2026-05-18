@@ -1376,6 +1376,14 @@ def create_app() -> Flask:
             'deals',
             'select=id,title,company,contact_name,contact_email,value,stage,source,notes,lost_reason,utm_source,utm_medium,utm_campaign,created_at,updated_at&order=created_at.desc&limit=1200',
         )
+        deal_tag_links = supabase().select_many(
+            'deal_tag_links',
+            'select=deal_id,tag_id&limit=5000',
+        )
+        deal_tags = supabase().select_many(
+            'deal_tags',
+            'select=id,name&limit=500',
+        )
         lead_captures = supabase().select_many(
             'lead_captures',
             'select=id,name,email,company,form_source,page_url,utm_source,utm_medium,utm_campaign,referrer,status,deal_id,converted_at,created_at&order=created_at.desc&limit=1200',
@@ -1413,6 +1421,18 @@ def create_app() -> Flask:
                 continue
             lead_by_deal[deal_id] = lead
 
+        tag_name_by_id = {str(tag.get('id')): str(tag.get('name') or '') for tag in deal_tags}
+        tags_by_deal: dict[str, list[str]] = {}
+        for link in deal_tag_links:
+            deal_id = str(link.get('deal_id') or '')
+            tag_id = str(link.get('tag_id') or '')
+            if not deal_id or not tag_id:
+                continue
+            tag_name = tag_name_by_id.get(tag_id)
+            if not tag_name:
+                continue
+            tags_by_deal.setdefault(deal_id, []).append(tag_name)
+
         referral_items: list[dict[str, Any]] = []
         for deal in deals:
             stage = str(deal.get('stage') or '').lower()
@@ -1423,12 +1443,14 @@ def create_app() -> Flask:
             utm_campaign = deal.get('utm_campaign')
             deal_id = str(deal.get('id') or '')
             lead = lead_by_deal.get(deal_id)
+            deal_tag_names = tags_by_deal.get(deal_id, [])
 
             referral_flag = (
                 is_referral_text(source)
                 or is_referral_text(notes)
                 or is_referral_text(utm_source)
                 or is_referral_text(utm_medium)
+                or any(is_referral_text(tag_name) for tag_name in deal_tag_names)
                 or (lead and (
                     is_referral_text(lead.get('utm_source'))
                     or is_referral_text(lead.get('utm_medium'))
@@ -1442,11 +1464,14 @@ def create_app() -> Flask:
             referrer_name = (
                 referrer_from_text(notes)
                 or referrer_from_text(source)
+                or next((referrer_from_text(tag_name) for tag_name in deal_tag_names if referrer_from_text(tag_name)), None)
                 or referrer_from_text(lead.get('referrer') if lead else None)
                 or referrer_domain(lead.get('referrer') if lead else None)
                 or 'Não identificado'
             )
             origin = (
+                next((tag_name for tag_name in deal_tag_names if is_referral_text(tag_name)), None)
+                or
                 (lead.get('utm_source') if lead else None)
                 or (lead.get('form_source') if lead else None)
                 or utm_source
@@ -1473,6 +1498,7 @@ def create_app() -> Flask:
                         'stage': stage or 'lead',
                         'value': value,
                         'is_converted': is_converted,
+                        'deal_tags': deal_tag_names,
                         'firstline_company_id': matched_company.get('id') if matched_company else None,
                         'customer_created_at': matched_company.get('created_at') if matched_company else None,
                         'customer_account_status': matched_company.get('account_status') if matched_company else None,
