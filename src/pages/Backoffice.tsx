@@ -1002,6 +1002,20 @@ export default function Backoffice() {
     });
   }, [growthReferral, referralSearch, referralStageFilter]);
 
+  const referralCustomers = useMemo(() => {
+    return (growthReferral?.customers || []).filter((item) => {
+      const term = referralSearch.trim().toLowerCase();
+      const matchesSearch =
+        !term ||
+        [item.referrer_name, item.referred_company, item.referred_contact, item.origin]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      const matchesStage = referralStageFilter === "all" || (item.stage || "").toLowerCase() === referralStageFilter;
+      return matchesSearch && matchesStage;
+    });
+  }, [growthReferral, referralSearch, referralStageFilter]);
+
   const referralFilteredSummary = useMemo(() => {
     const total = filteredReferralItems.length;
     const converted = filteredReferralItems.filter((item) => item.is_converted).length;
@@ -1530,9 +1544,10 @@ export default function Backoffice() {
               <h3 className="text-base font-semibold">Indicação</h3>
               <Badge variant="outline">{growthReferral?.summary.total_indications ?? 0} indicações totais</Badge>
             </div>
-            <div className="grid gap-4 md:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-6">
               <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Indicações (filtro)</p><p className="mt-2 font-mono text-2xl font-semibold">{referralFilteredSummary.total}</p></CardContent></Card>
               <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Convertidos</p><p className="mt-2 font-mono text-2xl font-semibold text-success">{referralFilteredSummary.converted}</p></CardContent></Card>
+              <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Clientes na base</p><p className="mt-2 font-mono text-2xl font-semibold">{growthReferral?.summary.customers_in_base ?? referralCustomers.length}</p></CardContent></Card>
               <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Taxa conversão</p><p className="mt-2 font-mono text-2xl font-semibold">{referralFilteredSummary.conversionRate}%</p></CardContent></Card>
               <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Pipeline</p><p className="mt-2 font-mono text-2xl font-semibold">{formatCurrency(referralFilteredSummary.pipeline)}</p></CardContent></Card>
               <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Receita ganha</p><p className="mt-2 font-mono text-2xl font-semibold text-primary">{formatCurrency(referralFilteredSummary.revenue)}</p></CardContent></Card>
@@ -1596,6 +1611,48 @@ export default function Backoffice() {
                 </CardContent>
               </Card>
             </div>
+
+            <Card>
+              <CardHeader><CardTitle>Clientes já convertidos por indicação</CardTitle></CardHeader>
+              <CardContent className="p-0">
+                {referralCustomers.length ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead>Quem indicou</TableHead>
+                        <TableHead>Origem</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Ação</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {referralCustomers.slice(0, 120).map((item) => (
+                        <TableRow key={`customer-${item.id}-${item.firstline_company_id || "na"}`}>
+                          <TableCell className="font-medium">
+                            {item.referred_company || "-"}
+                            <p className="text-xs text-muted-foreground">{item.referred_contact || "-"}</p>
+                          </TableCell>
+                          <TableCell>{item.referrer_name || "Não identificado"}</TableCell>
+                          <TableCell>{item.origin || "-"}</TableCell>
+                          <TableCell><Badge variant="outline">{accountStatusLabel(item.customer_account_status)}</Badge></TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={!item.firstline_company_id}
+                              onClick={() => void handleOpenCompany({ id: String(item.firstline_company_id), name: item.referred_company })}
+                            >
+                              Ver cliente
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : <EmptyState message="Nenhum cliente convertido por indicação encontrado com os filtros atuais." />}
+              </CardContent>
+            </Card>
           </section>
 
           <section className="space-y-4">

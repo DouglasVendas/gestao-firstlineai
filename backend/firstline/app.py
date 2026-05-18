@@ -1142,6 +1142,9 @@ def create_app() -> Flask:
         def as_float(value: Any) -> float:
             if value is None:
                 return 0.0
+
+        def normalize_text(value: Any) -> str:
+            return re.sub(r'\s+', ' ', str(value or '').strip().lower())
             try:
                 return float(value)
             except (TypeError, ValueError):
@@ -1197,6 +1200,27 @@ def create_app() -> Flask:
             'backoffice_stripe_purchases',
             'select=id,firstline_company_id,company_name,admin_name,admin_email,plan_name,billing_cycle,seat_quantity,amount_total,currency,payment_status,subscription_status,account_creation_status,account_creation_error,created_at,processed_at&order=created_at.desc&limit=1200',
         )
+        with firstline_db().engine.connect() as conn:
+            companies_rows = conn.execute(
+                text(
+                    """
+                    SELECT c.id, c.company_name, c.contact_email, c.account_status, c.created_at
+                    FROM public.company c
+                    ORDER BY c.created_at DESC NULLS LAST
+                    """
+                )
+            ).mappings().all()
+        companies = rows_to_dicts(companies_rows)
+
+        company_by_email: dict[str, dict[str, Any]] = {}
+        company_by_name: dict[str, dict[str, Any]] = {}
+        for company in companies:
+            email_key = normalize_text(company.get('contact_email'))
+            name_key = normalize_text(company.get('company_name'))
+            if email_key and email_key not in company_by_email:
+                company_by_email[email_key] = company
+            if name_key and name_key not in company_by_name:
+                company_by_name[name_key] = company
 
         lead_by_deal: dict[str, dict[str, Any]] = {}
         for lead in lead_captures:
@@ -1248,6 +1272,11 @@ def create_app() -> Flask:
 
             value = as_float(deal.get('value'))
             is_converted = stage == 'closed_won'
+            matched_company = (
+                company_by_email.get(normalize_text(deal.get('contact_email')))
+                or company_by_name.get(normalize_text(deal.get('company')))
+                or company_by_name.get(normalize_text(lead.get('company') if lead else None))
+            )
 
             referral_items.append(
                 json_safe(
@@ -1260,6 +1289,9 @@ def create_app() -> Flask:
                         'stage': stage or 'lead',
                         'value': value,
                         'is_converted': is_converted,
+                        'firstline_company_id': matched_company.get('id') if matched_company else None,
+                        'customer_created_at': matched_company.get('created_at') if matched_company else None,
+                        'customer_account_status': matched_company.get('account_status') if matched_company else None,
                         'lost_reason': deal.get('lost_reason'),
                         'created_at': deal.get('created_at'),
                         'updated_at': deal.get('updated_at'),
@@ -1268,9 +1300,21 @@ def create_app() -> Flask:
             )
 
         referral_items.sort(key=lambda item: item.get('created_at') or '', reverse=True)
+        referral_customers = [
+            item
+            for item in referral_items
+            if item.get('is_converted') or item.get('firstline_company_id')
+        ]
+        referral_customers.sort(
+            key=lambda item: (
+                item.get('customer_created_at') or item.get('updated_at') or item.get('created_at') or '',
+            ),
+            reverse=True,
+        )
 
         total_referrals = len(referral_items)
         converted_referrals = sum(1 for item in referral_items if item.get('is_converted'))
+        converted_customers_count = len(referral_customers)
         referral_pipeline_value = round(sum(as_float(item.get('value')) for item in referral_items if str(item.get('stage')) not in {'closed_won', 'closed_lost'}), 2)
         referral_revenue = round(sum(as_float(item.get('value')) for item in referral_items if item.get('is_converted')), 2)
         referral_conversion = round((converted_referrals / total_referrals * 100) if total_referrals else 0, 1)
@@ -1362,6 +1406,7 @@ def create_app() -> Flask:
                 'summary': {
                     'total_indications': total_referrals,
                     'converted_customers': converted_referrals,
+                    'customers_in_base': converted_customers_count,
                     'conversion_rate': referral_conversion,
                     'pipeline_value': referral_pipeline_value,
                     'revenue_won': referral_revenue,
@@ -1369,6 +1414,7 @@ def create_app() -> Flask:
                 },
                 'referrers': referrer_rank,
                 'items': referral_items[:300],
+                'customers': referral_customers[:300],
             },
             'plg': {
                 'summary': {

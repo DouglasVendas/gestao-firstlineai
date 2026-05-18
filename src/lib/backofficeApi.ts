@@ -414,6 +414,9 @@ export type GrowthReferralItem = {
   stage?: string;
   value?: number;
   is_converted?: boolean;
+  firstline_company_id?: string;
+  customer_created_at?: string;
+  customer_account_status?: string;
   lost_reason?: string;
   created_at?: string;
   updated_at?: string;
@@ -431,6 +434,7 @@ export type GrowthReferralOverview = {
   summary: {
     total_indications: number;
     converted_customers: number;
+    customers_in_base: number;
     conversion_rate: number;
     pipeline_value: number;
     revenue_won: number;
@@ -438,6 +442,7 @@ export type GrowthReferralOverview = {
   };
   referrers: GrowthReferralReferrer[];
   items: GrowthReferralItem[];
+  customers: GrowthReferralItem[];
 };
 
 export type GrowthPlgItem = {
