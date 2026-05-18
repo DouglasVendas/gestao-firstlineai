@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/formatters";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const defaultEmail = "douglasvslopes@gmail.com";
 const pageSize = 50;
@@ -69,6 +70,12 @@ export default function Backoffice() {
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companySearch, setCompanySearch] = useState("");
+  const [companyStatusFilter, setCompanyStatusFilter] = useState("all");
+  const [companyPlanFilter, setCompanyPlanFilter] = useState("all");
+  const [companySortBy, setCompanySortBy] = useState<"name" | "plan" | "users" | "created_at" | "status">("name");
+  const [companySortDirection, setCompanySortDirection] = useState<"asc" | "desc">("asc");
+  const [companyPage, setCompanyPage] = useState(1);
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [usersLinks, setUsersLinks] = useState<CompanyUserLink[]>([]);
   const [usersSummary, setUsersSummary] = useState<UsersSummary | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -173,11 +180,76 @@ export default function Backoffice() {
 
   const filteredCompanies = useMemo(() => {
     const term = companySearch.trim().toLowerCase();
-    if (!term) return companies;
-    return companies.filter((company) => [company.name, company.cnpj, company.contact_email, company.plan_name].join(" ").toLowerCase().includes(term));
-  }, [companies, companySearch]);
+    return companies.filter((company) => {
+      const matchesSearch = !term || [company.name, company.cnpj, company.contact_email, company.plan_name].join(" ").toLowerCase().includes(term);
+      const status = (company.account_status || "").toLowerCase();
+      const plan = (company.plan_name || "sem-plano").toLowerCase();
+      const matchesStatus = companyStatusFilter === "all" || status === companyStatusFilter;
+      const matchesPlan = companyPlanFilter === "all" || plan === companyPlanFilter;
+      return matchesSearch && matchesStatus && matchesPlan;
+    });
+  }, [companies, companySearch, companyStatusFilter, companyPlanFilter]);
+
+  const companyStatuses = useMemo(
+    () => Array.from(new Set(companies.map((company) => (company.account_status || "").toLowerCase()).filter(Boolean))),
+    [companies],
+  );
+
+  const companyPlans = useMemo(
+    () => Array.from(new Set(companies.map((company) => (company.plan_name || "Sem plano").trim()).filter(Boolean))),
+    [companies],
+  );
+
+  const sortedCompanies = useMemo(() => {
+    const sorted = [...filteredCompanies];
+    sorted.sort((a, b) => {
+      const direction = companySortDirection === "asc" ? 1 : -1;
+
+      if (companySortBy === "users") {
+        return ((a.active_users_count ?? 0) - (b.active_users_count ?? 0)) * direction;
+      }
+      if (companySortBy === "created_at") {
+        return ((a.created_at ? new Date(a.created_at).getTime() : 0) - (b.created_at ? new Date(b.created_at).getTime() : 0)) * direction;
+      }
+
+      const aValue =
+        companySortBy === "name" ? (a.name || "") :
+        companySortBy === "plan" ? (a.plan_name || "") :
+        (a.account_status || "");
+      const bValue =
+        companySortBy === "name" ? (b.name || "") :
+        companySortBy === "plan" ? (b.plan_name || "") :
+        (b.account_status || "");
+      return aValue.localeCompare(bValue, "pt-BR") * direction;
+    });
+    return sorted;
+  }, [filteredCompanies, companySortBy, companySortDirection]);
+
+  const companiesPerPage = 10;
+  const totalCompanyPages = Math.max(1, Math.ceil(sortedCompanies.length / companiesPerPage));
+  const paginatedCompanies = useMemo(() => {
+    const start = (companyPage - 1) * companiesPerPage;
+    return sortedCompanies.slice(start, start + companiesPerPage);
+  }, [sortedCompanies, companyPage]);
 
   const activeCompanies = filteredCompanies.filter((company) => (company.account_status || "").toLowerCase() === "active").length;
+
+  useEffect(() => {
+    setCompanyPage(1);
+  }, [companySearch, companyStatusFilter, companyPlanFilter, companySortBy, companySortDirection]);
+
+  useEffect(() => {
+    if (companyPage > totalCompanyPages) setCompanyPage(totalCompanyPages);
+  }, [companyPage, totalCompanyPages]);
+
+  function handleCompanySort(nextSort: "name" | "plan" | "users" | "created_at" | "status") {
+    if (companySortBy === nextSort) {
+      setCompanySortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setCompanySortBy(nextSort);
+    setCompanySortDirection("asc");
+  }
 
   if (isCheckingSession) {
     return <div className="flex h-[360px] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
@@ -231,8 +303,68 @@ export default function Backoffice() {
             <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Clientes listados</p><p className="mt-2 font-mono text-3xl font-semibold">{filteredCompanies.length}</p></CardContent></Card>
             <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Clientes ativos</p><p className="mt-2 font-mono text-3xl font-semibold text-success">{activeCompanies}</p></CardContent></Card>
           </div>
-          <Input placeholder="Buscar por empresa, CNPJ, e-mail ou plano" value={companySearch} onChange={(event) => setCompanySearch(event.target.value)} />
-          <Card><CardContent className="p-0">{filteredCompanies.length ? <Table><TableHeader><TableRow><TableHead>Empresa</TableHead><TableHead>Plano</TableHead><TableHead>Usuários</TableHead><TableHead>Cadastro</TableHead><TableHead>Status</TableHead></TableRow></TableHeader><TableBody>{filteredCompanies.map((company) => <TableRow key={company.id}><TableCell className="font-medium">{company.name || "-"}<p className="text-xs text-muted-foreground">{company.contact_email || "-"}</p></TableCell><TableCell>{company.plan_name || "Sem plano"}</TableCell><TableCell>{company.active_users_count ?? 0} ativos / {company.users_count ?? 0} totais</TableCell><TableCell>{fmtDate(company.created_at)}</TableCell><TableCell><Badge variant="outline">{company.account_status || "-"}</Badge></TableCell></TableRow>)}</TableBody></Table> : <EmptyState message="Nenhuma empresa retornada ainda. O backend está conectado; falta mapear o schema de empresas do FirstLine para o banco atual." />}</CardContent></Card>
+          <div className="grid gap-3 lg:grid-cols-3">
+            <Input placeholder="Buscar por empresa, CNPJ, e-mail ou plano" value={companySearch} onChange={(event) => setCompanySearch(event.target.value)} />
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={companyStatusFilter} onChange={(event) => setCompanyStatusFilter(event.target.value)}>
+              <option value="all">Todos os status</option>
+              {companyStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={companyPlanFilter} onChange={(event) => setCompanyPlanFilter(event.target.value)}>
+              <option value="all">Todos os planos</option>
+              {companyPlans.map((plan) => <option key={plan} value={plan.toLowerCase()}>{plan}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>{sortedCompanies.length} cliente(s) no resultado</span>
+            <Button variant="ghost" size="sm" onClick={() => {
+              setCompanySearch("");
+              setCompanyStatusFilter("all");
+              setCompanyPlanFilter("all");
+              setCompanySortBy("name");
+              setCompanySortDirection("asc");
+            }}>
+              Limpar filtros
+            </Button>
+          </div>
+          <Card>
+            <CardContent className="p-0">
+              {sortedCompanies.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead><button type="button" onClick={() => handleCompanySort("name")}>Empresa</button></TableHead>
+                      <TableHead><button type="button" onClick={() => handleCompanySort("plan")}>Plano</button></TableHead>
+                      <TableHead><button type="button" onClick={() => handleCompanySort("users")}>Usuários</button></TableHead>
+                      <TableHead><button type="button" onClick={() => handleCompanySort("created_at")}>Cadastro</button></TableHead>
+                      <TableHead><button type="button" onClick={() => handleCompanySort("status")}>Status</button></TableHead>
+                      <TableHead>Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedCompanies.map((company) => (
+                      <TableRow key={company.id} className="hover:bg-muted/40" onDoubleClick={() => setSelectedCompany(company)}>
+                        <TableCell className="font-medium">{company.name || "-"}<p className="text-xs text-muted-foreground">{company.contact_email || "-"}</p></TableCell>
+                        <TableCell>{company.plan_name || "Sem plano"}</TableCell>
+                        <TableCell>{company.active_users_count ?? 0} ativos / {company.users_count ?? 0} totais</TableCell>
+                        <TableCell>{fmtDate(company.created_at)}</TableCell>
+                        <TableCell><Badge variant="outline">{company.account_status || "-"}</Badge></TableCell>
+                        <TableCell>
+                          <Button size="sm" variant="outline" onClick={() => setSelectedCompany(company)}>Ver detalhes</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <EmptyState message="Nenhuma empresa retornada ainda. O backend está conectado; falta mapear o schema de empresas do FirstLine para o banco atual." />
+              )}
+            </CardContent>
+          </Card>
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" size="sm" disabled={companyPage <= 1} onClick={() => setCompanyPage((prev) => Math.max(1, prev - 1))}>Anterior</Button>
+            <span className="text-sm text-muted-foreground">Página {companyPage} de {totalCompanyPages}</span>
+            <Button variant="outline" size="sm" disabled={companyPage >= totalCompanyPages} onClick={() => setCompanyPage((prev) => Math.min(totalCompanyPages, prev + 1))}>Próxima</Button>
+          </div>
         </TabsContent>
 
         <TabsContent value="users" className="space-y-4">
@@ -309,6 +441,27 @@ export default function Backoffice() {
       </Tabs>
 
       <div className="rounded-lg border border-border bg-secondary/30 p-4 text-sm text-muted-foreground"><Database className="mr-2 inline h-4 w-4" />Backend conectado. Esta é a primeira camada do backoffice; os dados operacionais entram quando mapearmos o schema FirstLine completo.</div>
+
+      <Dialog open={!!selectedCompany} onOpenChange={(open) => !open && setSelectedCompany(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{selectedCompany?.name || "Cliente"}</DialogTitle>
+          </DialogHeader>
+          {selectedCompany && (
+            <div className="grid gap-3 text-sm">
+              <div><span className="text-muted-foreground">E-mail:</span> {selectedCompany.contact_email || "-"}</div>
+              <div><span className="text-muted-foreground">CNPJ:</span> {selectedCompany.cnpj || "-"}</div>
+              <div><span className="text-muted-foreground">Telefone:</span> {selectedCompany.phone || "-"}</div>
+              <div><span className="text-muted-foreground">Plano:</span> {selectedCompany.plan_name || "Sem plano"}</div>
+              <div><span className="text-muted-foreground">Tipo de cobrança:</span> {selectedCompany.plan_payment_type || "-"}</div>
+              <div><span className="text-muted-foreground">Usuários:</span> {selectedCompany.active_users_count ?? 0} ativos / {selectedCompany.users_count ?? 0} totais</div>
+              <div><span className="text-muted-foreground">Status:</span> {selectedCompany.account_status || "-"}</div>
+              <div><span className="text-muted-foreground">Cadastro:</span> {fmtDate(selectedCompany.created_at)}</div>
+              <div><span className="text-muted-foreground">Expiração:</span> {fmtDate(selectedCompany.expiration_date)}</div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
