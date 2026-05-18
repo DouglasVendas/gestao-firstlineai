@@ -25,12 +25,10 @@ import {
   type BillingSummary,
   type Company,
   type CompanyDetail,
-  type CompanyUserLink,
   type InternalUser,
   type Plan,
   type StripeEvent,
   type StripePurchase,
-  type UsersSummary,
 } from "@/lib/backofficeApi";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,7 +43,7 @@ import { useToast } from "@/hooks/use-toast";
 
 const defaultEmail = "douglasvslopes@gmail.com";
 const pageSize = 100;
-type Section = "companies" | "users" | "plans" | "finance" | "monitoring";
+type Section = "companies" | "plans" | "finance" | "monitoring";
 type SavedView =
   | "all"
   | "risk"
@@ -183,6 +181,7 @@ export default function Backoffice() {
   const [companyStripePurchases, setCompanyStripePurchases] = useState<StripePurchase[]>([]);
   const [companyAlerts, setCompanyAlerts] = useState<BackofficeAlert[]>([]);
   const [companyAuditLog, setCompanyAuditLog] = useState<AuditLogItem[]>([]);
+  const [selectedCompanyUser, setSelectedCompanyUser] = useState<NonNullable<CompanyDetail["users"]>[number] | null>(null);
   const [isLoadingCompanyDetail, setIsLoadingCompanyDetail] = useState(false);
   const [statusForm, setStatusForm] = useState({ status: "active", reason: "" });
   const [planForm, setPlanForm] = useState({ subscriptionId: "", expirationDate: "", reason: "" });
@@ -201,15 +200,6 @@ export default function Backoffice() {
   const [isSavingLimits, setIsSavingLimits] = useState(false);
   const [isSavingBilling, setIsSavingBilling] = useState(false);
 
-  const [usersLinks, setUsersLinks] = useState<CompanyUserLink[]>([]);
-  const [usersSummary, setUsersSummary] = useState<UsersSummary | null>(null);
-  const [userSearch, setUserSearch] = useState("");
-  const [userStatusFilter, setUserStatusFilter] = useState("all");
-  const [userCalendarFilter, setUserCalendarFilter] = useState("all");
-  const [userUsageFilter, setUserUsageFilter] = useState("all");
-  const [userRoleFilter, setUserRoleFilter] = useState("all");
-  const [userCompanyFilter, setUserCompanyFilter] = useState("all");
-  const [userOnboardingFilter, setUserOnboardingFilter] = useState("all");
   const [userActionLinkId, setUserActionLinkId] = useState<string | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [billingItems, setBillingItems] = useState<BillingCompany[]>([]);
@@ -266,12 +256,6 @@ export default function Backoffice() {
         if (plansResponse) {
           setPlans(plansResponse.plans || []);
         }
-      }
-      if (activeSection === "users") {
-        const response = await backofficeApi.users(1, pageSize);
-        setUsersLinks(response.items || []);
-        setUsersSummary(response.summary || null);
-        setBackendMessage(response.message || "");
       }
       if (activeSection === "plans") {
         const response = await backofficeApi.plans();
@@ -341,20 +325,15 @@ export default function Backoffice() {
     }
   }
 
-  async function refreshUsers() {
-    const response = await backofficeApi.users(1, pageSize);
-    setUsersLinks(response.items || []);
-    setUsersSummary(response.summary || null);
-  }
-
-  async function handleUserStatus(link: CompanyUserLink, status: "ACTIVE" | "INACTIVE" | "SUSPENDED") {
+  async function handleUserStatus(link: NonNullable<CompanyDetail["users"]>[number], status: "ACTIVE" | "INACTIVE" | "SUSPENDED") {
+    if (!selectedCompany || !link.link_id) return;
     const reason = status === "ACTIVE" ? "" : window.prompt(`Motivo para alterar status para ${status}:`) || "";
     if (status !== "ACTIVE" && !reason.trim()) return;
-    setUserActionLinkId(link.link_id);
+    setUserActionLinkId(link.link_id || null);
     try {
       await backofficeApi.updateUserStatus(link.link_id, { status, reason: reason || undefined });
-      await refreshUsers();
-      toast({ title: "Status do usuário atualizado", description: `${link.user_name || "Usuário"} agora está ${status}.` });
+      await Promise.all([refreshSelectedCompany(selectedCompany.id), loadData("companies")]);
+      toast({ title: "Status do usuário atualizado", description: `${link.name || "Usuário"} agora está ${status}.` });
     } catch (err) {
       toast({ variant: "destructive", title: "Falha ao atualizar usuário", description: err instanceof Error ? err.message : "Erro inesperado" });
     } finally {
@@ -362,13 +341,14 @@ export default function Backoffice() {
     }
   }
 
-  async function handleUserRole(link: CompanyUserLink, role: string) {
+  async function handleUserRole(link: NonNullable<CompanyDetail["users"]>[number], role: string) {
+    if (!selectedCompany || !link.link_id) return;
     const reason = window.prompt("Motivo da mudança de papel (auditoria):") || "";
-    setUserActionLinkId(link.link_id);
+    setUserActionLinkId(link.link_id || null);
     try {
       await backofficeApi.updateUserRole(link.link_id, { role, reason: reason || undefined });
-      await refreshUsers();
-      toast({ title: "Papel atualizado", description: `${link.user_name || "Usuário"} atualizado para ${role}.` });
+      await Promise.all([refreshSelectedCompany(selectedCompany.id), loadData("companies")]);
+      toast({ title: "Papel atualizado", description: `${link.name || "Usuário"} atualizado para ${role}.` });
     } catch (err) {
       toast({ variant: "destructive", title: "Falha ao atualizar papel", description: err instanceof Error ? err.message : "Erro inesperado" });
     } finally {
@@ -376,13 +356,14 @@ export default function Backoffice() {
     }
   }
 
-  async function handleUserOnboarding(link: CompanyUserLink, completed: boolean) {
+  async function handleUserOnboarding(link: NonNullable<CompanyDetail["users"]>[number], completed: boolean) {
+    if (!selectedCompany || !link.link_id) return;
     const reason = window.prompt(completed ? "Motivo para marcar onboarding como concluído:" : "Motivo para reabrir onboarding:") || "";
-    setUserActionLinkId(link.link_id);
+    setUserActionLinkId(link.link_id || null);
     try {
       await backofficeApi.updateUserOnboarding(link.link_id, { completed, reason: reason || undefined });
-      await refreshUsers();
-      toast({ title: "Onboarding atualizado", description: `${link.user_name || "Usuário"} ${completed ? "concluiu" : "voltou para pendente"}.` });
+      await Promise.all([refreshSelectedCompany(selectedCompany.id), loadData("companies")]);
+      toast({ title: "Onboarding atualizado", description: `${link.name || "Usuário"} ${completed ? "concluiu" : "voltou para pendente"}.` });
     } catch (err) {
       toast({ variant: "destructive", title: "Falha ao atualizar onboarding", description: err instanceof Error ? err.message : "Erro inesperado" });
     } finally {
@@ -390,16 +371,18 @@ export default function Backoffice() {
     }
   }
 
-  async function handleRemoveUserLink(link: CompanyUserLink) {
-    const confirmed = window.confirm(`Remover vínculo de ${link.user_name || "usuário"} com ${link.company_name || "empresa"}?`);
+  async function handleRemoveUserLink(link: NonNullable<CompanyDetail["users"]>[number]) {
+    if (!selectedCompany || !link.link_id) return;
+    const confirmed = window.confirm(`Remover vínculo de ${link.name || "usuário"} com ${companyDetail?.name || "empresa"}?`);
     if (!confirmed) return;
     const reason = window.prompt("Motivo da remoção (obrigatório):") || "";
     if (!reason.trim()) return;
-    setUserActionLinkId(link.link_id);
+    setUserActionLinkId(link.link_id || null);
     try {
       await backofficeApi.removeUserLink(link.link_id, reason);
-      await refreshUsers();
+      await Promise.all([refreshSelectedCompany(selectedCompany.id), loadData("companies")]);
       toast({ title: "Vínculo removido", description: "Usuário desvinculado da empresa com sucesso." });
+      setSelectedCompanyUser(null);
     } catch (err) {
       toast({ variant: "destructive", title: "Falha ao remover vínculo", description: err instanceof Error ? err.message : "Erro inesperado" });
     } finally {
@@ -756,72 +739,6 @@ export default function Backoffice() {
     return { projectedMrr, critical, paymentIssues };
   }, [filteredCompanies]);
 
-  const userRoles = useMemo(
-    () => Array.from(new Set(usersLinks.map((item) => (item.role || item.seller_type || "").trim()).filter(Boolean))),
-    [usersLinks],
-  );
-  const userCompanies = useMemo(
-    () => Array.from(new Set(usersLinks.map((item) => (item.company_name || "").trim()).filter(Boolean))),
-    [usersLinks],
-  );
-
-  const filteredUsersLinks = useMemo(() => {
-    const term = userSearch.trim().toLowerCase();
-    return usersLinks.filter((link) => {
-      const matchesSearch =
-        !term ||
-        [link.user_name, link.user_email, link.company_name, link.role, link.seller_type].join(" ").toLowerCase().includes(term);
-      const status = String(link.user_status || "").toUpperCase();
-      const matchesStatus = userStatusFilter === "all" || status === userStatusFilter;
-      const hasGoogle = !!link.calendar_connected;
-      const hasMicrosoft = !!link.microsoft_calendar_connected;
-      const hasCalendar = hasGoogle || hasMicrosoft;
-      const matchesCalendar =
-        userCalendarFilter === "all" ||
-        (userCalendarFilter === "connected" && hasCalendar) ||
-        (userCalendarFilter === "none" && !hasCalendar) ||
-        (userCalendarFilter === "google" && hasGoogle) ||
-        (userCalendarFilter === "microsoft" && hasMicrosoft);
-
-      const analyses7 = Number(link.analyses_7d || 0);
-      const analyses30 = Number(link.analyses_30d || 0);
-      const matchesUsage =
-        userUsageFilter === "all" ||
-        (userUsageFilter === "no_7d" && analyses7 === 0) ||
-        (userUsageFilter === "no_30d" && analyses30 === 0) ||
-        (userUsageFilter === "active_30d" && analyses30 > 0);
-
-      const roleLabel = (link.role || link.seller_type || "").trim().toLowerCase();
-      const matchesRole = userRoleFilter === "all" || roleLabel === userRoleFilter;
-      const matchesCompany = userCompanyFilter === "all" || (link.company_name || "") === userCompanyFilter;
-      const hasOnboarding = !!link.onboarding_completed_at;
-      const matchesOnboarding =
-        userOnboardingFilter === "all" ||
-        (userOnboardingFilter === "pending" && !hasOnboarding) ||
-        (userOnboardingFilter === "done" && hasOnboarding);
-
-      return matchesSearch && matchesStatus && matchesCalendar && matchesUsage && matchesRole && matchesCompany && matchesOnboarding;
-    });
-  }, [
-    usersLinks,
-    userSearch,
-    userStatusFilter,
-    userCalendarFilter,
-    userUsageFilter,
-    userRoleFilter,
-    userCompanyFilter,
-    userOnboardingFilter,
-  ]);
-
-  const usersOpsSummary = useMemo(() => {
-    const total = filteredUsersLinks.length;
-    const active = filteredUsersLinks.filter((item) => String(item.user_status || "").toUpperCase() === "ACTIVE").length;
-    const withCalendar = filteredUsersLinks.filter((item) => !!item.calendar_connected || !!item.microsoft_calendar_connected).length;
-    const noUsage30d = filteredUsersLinks.filter((item) => Number(item.analyses_30d || 0) === 0).length;
-    const onboardingPending = filteredUsersLinks.filter((item) => !item.onboarding_completed_at).length;
-    return { total, active, withCalendar, noUsage30d, onboardingPending };
-  }, [filteredUsersLinks]);
-
   useEffect(() => {
     setCompanyPage(1);
   }, [
@@ -918,9 +835,8 @@ export default function Backoffice() {
       </div>
 
       <Tabs value={section} onValueChange={(value) => switchSection(value as Section)}>
-        <TabsList className="grid w-full grid-cols-5 lg:w-[900px]">
+        <TabsList className="grid w-full grid-cols-4 lg:w-[760px]">
           <TabsTrigger value="companies"><Building2 className="mr-2 h-4 w-4" />Clientes</TabsTrigger>
-          <TabsTrigger value="users"><Users className="mr-2 h-4 w-4" />Usuários</TabsTrigger>
           <TabsTrigger value="plans"><ShieldCheck className="mr-2 h-4 w-4" />Planos</TabsTrigger>
           <TabsTrigger value="finance"><CreditCard className="mr-2 h-4 w-4" />Financeiro</TabsTrigger>
           <TabsTrigger value="monitoring"><Activity className="mr-2 h-4 w-4" />Monitoramento</TabsTrigger>
@@ -1097,154 +1013,6 @@ export default function Backoffice() {
           </div>
         </TabsContent>
 
-        <TabsContent value="users" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-5">
-            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Usuários no filtro</p><p className="mt-2 font-mono text-3xl font-semibold">{usersOpsSummary.total}</p></CardContent></Card>
-            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Ativos</p><p className="mt-2 font-mono text-3xl font-semibold text-success">{usersOpsSummary.active}</p></CardContent></Card>
-            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Com calendário</p><p className="mt-2 font-mono text-3xl font-semibold">{usersOpsSummary.withCalendar}</p></CardContent></Card>
-            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Sem uso 30d</p><p className="mt-2 font-mono text-3xl font-semibold text-warning">{usersOpsSummary.noUsage30d}</p></CardContent></Card>
-            <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Onboarding pendente</p><p className="mt-2 font-mono text-3xl font-semibold text-destructive">{usersOpsSummary.onboardingPending}</p></CardContent></Card>
-          </div>
-
-          <div className="grid gap-3 lg:grid-cols-4">
-            <Input placeholder="Buscar usuário, e-mail, empresa ou papel" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} />
-            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={userStatusFilter} onChange={(event) => setUserStatusFilter(event.target.value)}>
-              <option value="all">Status</option>
-              <option value="ACTIVE">Ativo</option>
-              <option value="INACTIVE">Inativo</option>
-              <option value="SUSPENDED">Suspenso</option>
-            </select>
-            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={userCalendarFilter} onChange={(event) => setUserCalendarFilter(event.target.value)}>
-              <option value="all">Calendário</option>
-              <option value="connected">Conectado</option>
-              <option value="none">Sem calendário</option>
-              <option value="google">Google</option>
-              <option value="microsoft">Microsoft</option>
-            </select>
-            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={userUsageFilter} onChange={(event) => setUserUsageFilter(event.target.value)}>
-              <option value="all">Uso</option>
-              <option value="no_7d">Sem uso 7d</option>
-              <option value="no_30d">Sem uso 30d</option>
-              <option value="active_30d">Com uso 30d</option>
-            </select>
-          </div>
-          <div className="grid gap-3 lg:grid-cols-4">
-            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={userRoleFilter} onChange={(event) => setUserRoleFilter(event.target.value)}>
-              <option value="all">Papel/Função</option>
-              {userRoles.map((role) => <option key={role} value={role.toLowerCase()}>{role}</option>)}
-            </select>
-            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={userCompanyFilter} onChange={(event) => setUserCompanyFilter(event.target.value)}>
-              <option value="all">Empresa</option>
-              {userCompanies.map((company) => <option key={company} value={company}>{company}</option>)}
-            </select>
-            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={userOnboardingFilter} onChange={(event) => setUserOnboardingFilter(event.target.value)}>
-              <option value="all">Onboarding</option>
-              <option value="pending">Pendente</option>
-              <option value="done">Concluído</option>
-            </select>
-            <Button variant="ghost" onClick={() => {
-              setUserSearch("");
-              setUserStatusFilter("all");
-              setUserCalendarFilter("all");
-              setUserUsageFilter("all");
-              setUserRoleFilter("all");
-              setUserCompanyFilter("all");
-              setUserOnboardingFilter("all");
-            }}>
-              Limpar filtros
-            </Button>
-          </div>
-
-          <Card>
-            <CardContent className="p-0">
-              {filteredUsersLinks.length ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Usuário</TableHead>
-                      <TableHead>Empresa</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Papel</TableHead>
-                      <TableHead>Calendário</TableHead>
-                      <TableHead>Uso</TableHead>
-                      <TableHead>Onboarding</TableHead>
-                      <TableHead>Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredUsersLinks.map((link) => {
-                      const isBusy = userActionLinkId === link.link_id;
-                      const currentRole = link.role || link.seller_type || "";
-                      const analyses30 = Number(link.analyses_30d || 0);
-                      return (
-                        <TableRow key={link.link_id}>
-                          <TableCell>
-                            {link.user_name || "-"}
-                            <p className="text-xs text-muted-foreground">{link.user_email || "-"}</p>
-                            <p className="text-xs text-muted-foreground">{link.user_phone || ""}</p>
-                          </TableCell>
-                          <TableCell>{link.company_name || "-"}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{link.user_status || "-"}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            <select
-                              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-                              defaultValue={currentRole}
-                              disabled={isBusy}
-                              onChange={(event) => {
-                                if (event.target.value && event.target.value !== currentRole) {
-                                  void handleUserRole(link, event.target.value);
-                                }
-                              }}
-                            >
-                              <option value={currentRole || ""}>{currentRole || "Sem papel"}</option>
-                              {userRoles.filter((role) => role !== currentRole).map((role) => (
-                                <option key={`${link.link_id}-${role}`} value={role}>{role}</option>
-                              ))}
-                              {!userRoles.includes("ADMIN") && <option value="ADMIN">ADMIN</option>}
-                              {!userRoles.includes("MEMBER") && <option value="MEMBER">MEMBER</option>}
-                              {!userRoles.includes("SELLER") && <option value="SELLER">SELLER</option>}
-                            </select>
-                          </TableCell>
-                          <TableCell>{calendarLabel(link.calendar_connected, link.microsoft_calendar_connected)}</TableCell>
-                          <TableCell>
-                            <span className="font-mono">{analyses30}</span>
-                            <p className="text-xs text-muted-foreground">7d: {Number(link.analyses_7d || 0)}</p>
-                            <p className="text-xs text-muted-foreground">Último: {fmtDateTime(link.last_analysis_at)}</p>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={link.onboarding_completed_at ? "default" : "outline"}>
-                              {link.onboarding_completed_at ? "Concluído" : "Pendente"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex flex-wrap gap-2">
-                              <Button size="sm" variant="outline" disabled={isBusy} onClick={() => void handleUserStatus(link, "ACTIVE")}>Ativar</Button>
-                              <Button size="sm" variant="outline" disabled={isBusy} onClick={() => void handleUserStatus(link, "INACTIVE")}>Inativar</Button>
-                              <Button size="sm" variant="outline" disabled={isBusy} onClick={() => void handleUserStatus(link, "SUSPENDED")}>Suspender</Button>
-                              <Button size="sm" variant="outline" disabled={isBusy} onClick={() => void handleUserOnboarding(link, !link.onboarding_completed_at)}>
-                                {link.onboarding_completed_at ? "Reabrir onboarding" : "Concluir onboarding"}
-                              </Button>
-                              <Button size="sm" variant="destructive" disabled={isBusy} onClick={() => void handleRemoveUserLink(link)}>Remover vínculo</Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              ) : (
-                <EmptyState message="Nenhum usuário encontrado com os filtros atuais." />
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="text-xs text-muted-foreground">
-            Snapshot geral: {usersSummary?.users_total ?? 0} usuários únicos · {usersSummary?.links_total ?? 0} vínculos · {usersSummary?.links_with_calendar ?? 0} com calendário · {usersSummary?.onboarding_pending ?? 0} onboarding pendente
-          </div>
-        </TabsContent>
-
         <TabsContent value="plans" className="space-y-4">
           <Card><CardContent className="p-0">{plans.length ? <Table><TableHeader><TableRow><TableHead>Plano</TableHead><TableHead>Tipo</TableHead><TableHead>Preço</TableHead><TableHead>Empresas</TableHead><TableHead>Status</TableHead></TableRow></TableHeader><TableBody>{plans.map((plan) => <TableRow key={plan.id}><TableCell className="font-medium">{plan.name}<p className="text-xs text-muted-foreground">{plan.description || "-"}</p></TableCell><TableCell>{plan.subscription_type || "-"} / {plan.payment_type || "-"}</TableCell><TableCell>{formatCurrency(Number(plan.price || 0))}</TableCell><TableCell>{plan.companies_count ?? 0}</TableCell><TableCell><Badge variant="outline">{plan.status}</Badge></TableCell></TableRow>)}</TableBody></Table> : <EmptyState message="Nenhum plano retornado ainda." />}</CardContent></Card>
         </TabsContent>
@@ -1318,6 +1086,7 @@ export default function Backoffice() {
       <Dialog open={!!selectedCompany} onOpenChange={(open) => {
         if (!open) {
           setSelectedCompany(null);
+          setSelectedCompanyUser(null);
           setCompanyDetail(null);
           setCompanyBilling(null);
           setCompanyBillingEvents([]);
@@ -1594,6 +1363,7 @@ export default function Backoffice() {
                             <th className="px-4 py-3 font-medium">Calendário</th>
                             <th className="px-4 py-3 font-medium">Último uso</th>
                             <th className="px-4 py-3 text-right font-medium">Análises</th>
+                            <th className="px-4 py-3 font-medium">Ações</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1605,6 +1375,11 @@ export default function Backoffice() {
                               <td className="px-4 py-3">{calendarLabel(user.calendar_connected, user.microsoft_calendar_connected)}</td>
                               <td className="px-4 py-3">{fmtDateTime(user.last_analysis_at)}</td>
                               <td className="px-4 py-3 text-right font-mono">{user.analyses_count ?? 0}</td>
+                              <td className="px-4 py-3">
+                                <Button size="sm" variant="outline" onClick={() => setSelectedCompanyUser(user)}>
+                                  Ver detalhes
+                                </Button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -1688,6 +1463,77 @@ export default function Backoffice() {
               </div>
             )}
           </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!selectedCompanyUser} onOpenChange={(open) => !open && setSelectedCompanyUser(null)}>
+        <DialogContent className="sm:max-w-[760px]">
+          <DialogHeader>
+            <DialogTitle>{selectedCompanyUser?.name || "Usuário"}</DialogTitle>
+          </DialogHeader>
+          {selectedCompanyUser ? (
+            <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-4">
+                <MetricTile label="Status" value={selectedCompanyUser.status || "-"} hint="Conta do usuário" />
+                <MetricTile label="Análises 7d" value={String(selectedCompanyUser.analyses_7d ?? 0)} hint="Uso recente" />
+                <MetricTile label="Análises 30d" value={String(selectedCompanyUser.analyses_30d ?? 0)} hint="Uso mensal" />
+                <MetricTile label="Último uso" value={fmtDate(selectedCompanyUser.last_analysis_at)} hint="Última análise registrada" />
+              </div>
+
+              <div className="grid gap-3 rounded-md border border-border p-4 text-sm md:grid-cols-2">
+                <div><span className="text-muted-foreground">E-mail:</span> {selectedCompanyUser.email || "-"}</div>
+                <div><span className="text-muted-foreground">Telefone:</span> {selectedCompanyUser.phone || "-"}</div>
+                <div><span className="text-muted-foreground">Papel:</span> {selectedCompanyUser.role || selectedCompanyUser.seller_type || "-"}</div>
+                <div><span className="text-muted-foreground">Calendário:</span> {calendarLabel(selectedCompanyUser.calendar_connected, selectedCompanyUser.microsoft_calendar_connected)}</div>
+                <div><span className="text-muted-foreground">Vinculado em:</span> {fmtDate(selectedCompanyUser.linked_at)}</div>
+                <div><span className="text-muted-foreground">Onboarding:</span> {selectedCompanyUser.onboarding_completed_at ? "Concluído" : "Pendente"}</div>
+              </div>
+
+              <div className="grid gap-3 rounded-md border border-border p-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Status de acesso</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" disabled={userActionLinkId === selectedCompanyUser.link_id} onClick={() => void handleUserStatus(selectedCompanyUser, "ACTIVE")}>Ativar</Button>
+                    <Button size="sm" variant="outline" disabled={userActionLinkId === selectedCompanyUser.link_id} onClick={() => void handleUserStatus(selectedCompanyUser, "INACTIVE")}>Inativar</Button>
+                    <Button size="sm" variant="outline" disabled={userActionLinkId === selectedCompanyUser.link_id} onClick={() => void handleUserStatus(selectedCompanyUser, "SUSPENDED")}>Suspender</Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Onboarding</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={userActionLinkId === selectedCompanyUser.link_id}
+                    onClick={() => void handleUserOnboarding(selectedCompanyUser, !selectedCompanyUser.onboarding_completed_at)}
+                  >
+                    {selectedCompanyUser.onboarding_completed_at ? "Reabrir onboarding" : "Concluir onboarding"}
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Papel/função</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" disabled={userActionLinkId === selectedCompanyUser.link_id} onClick={() => void handleUserRole(selectedCompanyUser, "ADMIN")}>ADMIN</Button>
+                    <Button size="sm" variant="outline" disabled={userActionLinkId === selectedCompanyUser.link_id} onClick={() => void handleUserRole(selectedCompanyUser, "MEMBER")}>MEMBER</Button>
+                    <Button size="sm" variant="outline" disabled={userActionLinkId === selectedCompanyUser.link_id} onClick={() => void handleUserRole(selectedCompanyUser, "SELLER")}>SELLER</Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Ação crítica</p>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={userActionLinkId === selectedCompanyUser.link_id}
+                    onClick={() => void handleRemoveUserLink(selectedCompanyUser)}
+                  >
+                    Remover vínculo deste cliente
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>

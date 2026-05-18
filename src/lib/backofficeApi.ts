@@ -181,6 +181,8 @@ export type CompanyDetail = Company & {
   }>;
   users?: Array<{
     id: string;
+    link_id?: string;
+    company_id?: string;
     name?: string;
     email?: string;
     phone?: string;
@@ -188,9 +190,11 @@ export type CompanyDetail = Company & {
     role?: string;
     seller_type?: string;
     linked_at?: string;
+    onboarding_completed_at?: string;
     calendar_connected?: boolean;
     microsoft_calendar_connected?: boolean;
     analyses_count?: number;
+    analyses_7d?: number;
     analyses_30d?: number;
     last_analysis_at?: string;
     avg_score_geral?: number;

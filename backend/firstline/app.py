@@ -799,18 +799,20 @@ class FirstlineDb:
                 conn.execute(
                     text(
                         """
-                        SELECT u.id, u.name, u.email, u.phone, u.status, uc.role, uc.seller_type,
-                               uc.created_at AS linked_at, u.calendar_connected, u.microsoft_calendar_connected,
+                        SELECT u.id, u.name, u.email, u.phone, u.status, uc.id AS link_id, uc.company_id,
+                               uc.role, uc.seller_type, uc.created_at AS linked_at, uc.onboarding_completed_at,
+                               u.calendar_connected, u.microsoft_calendar_connected,
                                count(a.id) AS analyses_count,
                                count(a.id) FILTER (WHERE a.created_at >= now() - interval '30 days') AS analyses_30d,
+                               count(a.id) FILTER (WHERE a.created_at >= now() - interval '7 days') AS analyses_7d,
                                max(a.created_at) AS last_analysis_at,
                                avg(a.score_geral) AS avg_score_geral
                         FROM public.user_company uc
                         JOIN public.users u ON u.id = uc.user_id
                         LEFT JOIN public.analyses a ON a.user_id = u.id
                         WHERE uc.company_id = :company_id
-                        GROUP BY u.id, u.name, u.email, u.phone, u.status, uc.role, uc.seller_type,
-                                 uc.created_at, u.calendar_connected, u.microsoft_calendar_connected
+                        GROUP BY u.id, u.name, u.email, u.phone, u.status, uc.id, uc.company_id, uc.role, uc.seller_type,
+                                 uc.created_at, uc.onboarding_completed_at, u.calendar_connected, u.microsoft_calendar_connected
                         ORDER BY uc.created_at DESC NULLS LAST
                         """
                     ),
