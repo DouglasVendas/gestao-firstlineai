@@ -1392,10 +1392,13 @@ def create_app() -> Flask:
             'backoffice_stripe_purchases',
             'select=id,firstline_company_id,company_name,admin_name,admin_email,plan_name,billing_cycle,seat_quantity,amount_total,currency,payment_status,subscription_status,account_creation_status,account_creation_error,created_at,processed_at&order=created_at.desc&limit=1200',
         )
-        billing_rows = supabase().select_many(
-            'backoffice_company_billing',
-            'select=firstline_company_id,mrr_net,arr_net,expected_mrr,expected_arr,billing_health,next_billing_date',
-        )
+        try:
+            billing_rows = supabase().select_many(
+                'backoffice_company_billing',
+                'select=firstline_company_id,expected_mrr,expected_arr,billing_health,next_billing_date',
+            )
+        except Exception:
+            billing_rows = []
         with firstline_db().engine.connect() as conn:
             companies_rows = conn.execute(
                 text(
@@ -1546,7 +1549,7 @@ def create_app() -> Flask:
             account_status = str(company.get('account_status') or '').lower()
             billing_row = billing_by_company.get(company_id, {})
             plan_name = str(company.get('plan_name') or '').strip()
-            expected_mrr = as_float(billing_row.get('mrr_net') or billing_row.get('expected_mrr'))
+            expected_mrr = as_float(billing_row.get('expected_mrr'))
             is_converted = account_status in {'active', 'trial'} or bool(plan_name) or expected_mrr > 0
             referral_items.append(
                 json_safe(
